@@ -1,0 +1,17 @@
+*.tif
+*.log
+*.pyc
+*.h5
+*.pth
+*.npz
+*.pth
+*.shp
+*.dbf
+*.prj
+*.shx
+*.zip
+*.png
+*.pkl
+*.txt
+**/tensorboard_logs/
+*.pt
