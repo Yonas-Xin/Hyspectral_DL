@@ -84,21 +84,43 @@ def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=
     dataset = None
     return output_file
 
-def Mianvector2mask(geotransform=None, projection=None, width=None, height=None, vector_path=None, fill_value=255, pixel_size=1.0):
+def read_tif(tif_path):
+    """读取tif文件，返回地理变换、投影、高宽、波段数"""
+    need_close = False
+    if isinstance(tif_path, str):
+        im_dataset = gdal.Open(tif_path)
+        if im_dataset is None:
+            raise RuntimeError(f"无法打开影像文件: {tif_path}")
+        need_close = True
+    elif isinstance(tif_path, gdal.Dataset):
+        im_dataset = tif_path
+    else:
+        raise TypeError("tif_path必须是文件路径字符串或GDAL数据集对象")
+    im_geotrans = im_dataset.GetGeoTransform()
+    im_proj = im_dataset.GetProjection()
+    im_width = im_dataset.RasterXSize # 宽
+    im_height = im_dataset.RasterYSize # 高
+    im_bands = im_dataset.RasterCount
+    if need_close:
+        im_dataset = None
+    return im_geotrans, im_proj, im_width, im_height, im_bands
+    
+
+def Mianvector2mask(vector_path, tif_path=None, fill_value=255, pixel_size=1.0):
     """
     使用GDAL将矢量文件转换为numpy矩阵（mask矩阵）, 如果提供了width和height则使用，否则根据矢量范围和像素大小创建mask矩阵
     :param vector_path: 矢量文件路径（Shapefile）
+    :param tif_path: 可选的参考tif文件路径，用于获取地理变换和投影信息
     :return: NumPy矩阵 (H, W)
     """
     vector_ds = ogr.Open(vector_path)
     if not vector_ds:
         raise RuntimeError(f"无法打开矢量文件 {vector_path}")
-
     layer = vector_ds.GetLayer()
-
     # 创建一个内存栅格数据集，存储矢量化数据
     mem_driver = gdal.GetDriverByName("MEM")
-    if width is not None and height is not None:
+    if tif_path is not None:
+        geotransform, projection, width, height, bands = read_tif(tif_path)
         mem_raster = mem_driver.Create("", width, height, 1, gdal.GDT_Int16)
         mem_raster.SetGeoTransform(geotransform)  # 设定仿射变换
         mem_raster.SetProjection(projection)  # 设定投影
@@ -119,11 +141,12 @@ def Mianvector2mask(geotransform=None, projection=None, width=None, height=None,
     mem_raster = None
     return matrix, geotransform, projection
 
-def mask_to_point_shp(mask_matrix, geotransform, projection=None, output_shapefile="./Position_mask/test.shp"):
+def mask_to_point_shp(mask_matrix, tif_path, output_shapefile="./Position_mask/test.shp"):
     """
     将二维矩阵mask矩阵转化为矢量点文件
     """
     # 获取矩阵的行和列
+    geotransform, projection, _, _, _ = read_tif(tif_path)
     rows, cols = mask_matrix.shape
     driver = ogr.GetDriverByName('ESRI Shapefile')
     if not driver:
@@ -158,9 +181,10 @@ def mask_to_point_shp(mask_matrix, geotransform, projection=None, output_shapefi
     data_source = None
     print(f"{output_shapefile} has been created successfully.")
 
-def mask_to_multipoint_shp(mask_matrix, geotransform, projection=None, output_dir="./Position_mask", output_dir_name=None):
+def mask_to_multipoint_shp(mask_matrix, tif_path, output_dir="./Position_mask", output_dir_name=None):
     """
-    在指定文件夹下创建一个新文件夹保存样本的矢量点文件"""
+    在指定文件夹下创建一个新文件夹保存样本的矢量点文件
+    """
     labels = np.unique(mask_matrix)
     if output_dir_name is None:
         output_dir_name = 'SAMPLES_DIR'
@@ -177,13 +201,17 @@ def mask_to_multipoint_shp(mask_matrix, geotransform, projection=None, output_di
             current_time = datetime.now().strftime("%Y%m%d%H%M%S")
             output_shapefile = os.path.join(OUTPUT_DIR, f"{current_time}_sample.shp")
             input[mask_matrix == label] = label
-            mask_to_point_shp(input, geotransform, projection, output_shapefile)
+            mask_to_point_shp(input, tif_path, output_shapefile)
 
-def point_shp_to_mask(shapefile, geotransform, rows, cols, value=None):
+def point_shp_to_mask(shapefile, tif_path, value=None):
     """
     将矢量点文件转化为二维矩阵（mask矩阵）
     mask属性值从1开始，背景为0
+    :param shapefile: 矢量点文件路径
+    :param tif_path: 参考tif文件路径，用于获取地理变换和矩阵大小
+    :param value: 可选的指定mask的值
     """
+    geotransform, projection, cols, rows, bands = read_tif(tif_path)
     mask_matrix = np.zeros((rows, cols), dtype=int)
     driver = ogr.GetDriverByName('ESRI Shapefile')
     data_source = ogr.Open(shapefile)
@@ -218,16 +246,17 @@ def point_shp_to_mask(shapefile, geotransform, rows, cols, value=None):
     data_source = None
     return mask_matrix
 
-def mutipoint_shp_to_mask(shapefile_dir, geotransform, rows, cols):
+def mutipoint_shp_to_mask(shapefile_dir, tif_path):
     """
     将指定文件夹下的所有矢量点文件转化为二维矩阵（mask矩阵）
     """
+    _, _, cols, rows, _ = read_tif(tif_path)
     mask_matrix = np.zeros((rows, cols), dtype=int)
     shapefiles = search_files_in_directory(shapefile_dir, extension='.shp')
     if not shapefiles:
         raise RuntimeError(f"No shapefiles found in directory: {shapefile_dir}")
     for idx, shapefile in enumerate(shapefiles):
-        temp_mask = point_shp_to_mask(shapefile, geotransform, rows, cols, value=idx+1)
+        temp_mask = point_shp_to_mask(shapefile, tif_path, value=idx+1)
         # 检查是否有重叠（即 mask_matrix 和 temp_mask 在相同位置都有非零值）
         overlap = np.logical_and(mask_matrix > 0, temp_mask > 0)
         if np.any(overlap):
@@ -395,7 +424,7 @@ def clip_by_shp(out_dir, sr_img, shp_path, patch_size=30, out_tif_name='img', la
     geom_type_name = ogr.GeometryTypeToName(geom_type)
     # 判断是点矢量还是面矢量
     if geom_type_name == "Polygon": 
-        mask,_,_ = Mianvector2mask(im_geotrans, im_proj, im_width, im_height, shp_path, fill_value=1)
+        mask,_,_ = Mianvector2mask(shp_path, im_dataset, fill_value=1)
         positions = np.column_stack(np.where(mask == 1)).tolist()
         if len(positions) > sample_num: # 如果是面矢量且采样量多大，控制采样量为sample_num
             random.seed(42)  # For reproducibility
@@ -675,7 +704,7 @@ def random_split_shp(input_shp, output_shp1, output_shp2, num_to_select, pixel_s
     geom_type_name = ogr.GeometryTypeToName(geom_type)
     # 判断是点矢量还是面矢量
     if geom_type_name == "Polygon":
-        mask,geotransform,projection = Mianvector2mask(vector_path=input_shp, fill_value=1, pixel_size=pixel_size)
+        mask,geotransform,projection = Mianvector2mask(input_shp, fill_value=1, pixel_size=pixel_size)
         random.seed(42)
         ones_coords = np.argwhere(mask == 1)
         n_ones = len(ones_coords)

@@ -43,16 +43,15 @@ class Hyperspectral_Image:
         except (AttributeError,RuntimeError):
             return 1
 
-    def create_vector(self,mask,out_file): # mask 转单矢量点
-        mask_to_point_shp(mask, self.geotransform, self.projection,
-                                   output_shapefile=out_file)
+    def create_vector(self, mask, out_file): # mask 转单矢量点
+        mask_to_point_shp(mask, self.dataset, out_file)
         
     def create_mask(self, input_file): # 矢量点转mask，点的数值由“class”字段确定
-        return point_shp_to_mask(input_file, self.geotransform, self.rows, self.cols)
+        return point_shp_to_mask(input_file, self.dataset)
     
     def create_mask_from_mutivector(self, inputdir): # 多矢量点转mask
-        return mutipoint_shp_to_mask(inputdir, self.geotransform, self.rows, self.cols)
-    
+        return mutipoint_shp_to_mask(inputdir, self.dataset)
+
     def save_tif(self, filename, img_data, nodata = None, mask=None):
         '''将(rows, cols,  bands)或(rows, cols)的数据存为tif格式, tif具有与img相同的投影信息'''
         nodata = self.no_data if nodata is None else nodata
@@ -74,13 +73,13 @@ class Hyperspectral_Image:
     
     def Mianvector2raster(self, input_shp, out_tif, nodata=0, fill_value=255):
         '''将矢量面转为栅格，矢量内区域设为fill_value，外部区域设为0，处理结果与原始数据大小一致'''
-        mask,_,_ = Mianvector2mask(self.geotransform, self.projection, width=self.cols, height=self.rows, vector_path=input_shp, fill_value=fill_value)
+        mask,_,_ = Mianvector2mask(vector_path=input_shp, tif_path=self.dataset, fill_value=fill_value)
         mask = mask.astype(np.uint8)
         self.save_tif(out_tif, mask, nodata=nodata)
     
     def Mianvector_clip_tif(self, input_shp, out_tif, nodata=0, fill_value=1):
         '''根据面shp文件对影像进行裁剪，矢量内区域保留，外部区域设为nodata，处理结果与原始数据大小一致'''
-        mask,_,_ = Mianvector2mask(self.geotransform, self.projection, width=self.cols, height=self.rows, vector_path=input_shp, fill_value=fill_value)
+        mask,_,_ = Mianvector2mask(vector_path=input_shp, tif_path=self.dataset, fill_value=fill_value)
         mask = mask.astype(bool)
         self.save_tif(out_tif, self.get_dataset(scale=1), nodata=nodata, mask=mask) # 保存裁剪影像，原始数据不缩放
 
