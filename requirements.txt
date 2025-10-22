@@ -1,0 +1,9 @@
+#pytorch 自行安装
+matplotlib==3.10.1
+numpy==2.2.6
+tqdm==4.67.1
+spectral==0.24
+tensorboard==2.20.0
+scikit-learn==1.7.2
+gdal==3.11.0
+# conda install -c conda-forge gdal==3.11.0

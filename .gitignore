@@ -12,6 +12,5 @@
 *.zip
 *.png
 *.pkl
-*.txt
 **/tensorboard_logs/
 *.pt
