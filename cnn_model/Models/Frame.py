@@ -272,7 +272,7 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 loss.backward()
                 optimizer.step()
 
-            DRAW_FEATURE_MAPS = True if epoch % 20 == 0 and SWANLAB_AVAILABLE else False # 每20个epoch绘制一次特征图
+            DRAW_FEATURE_MAPS = True if (epoch % 20 == 0 or epoch == 1) and SWANLAB_AVAILABLE else False # 每20个epoch绘制一次特征图
             if eval_dataloader is not None:
                 DRAW_FEATURE_POSITION = int(frame.feature_map_position * len(eval_dataloader.dataset)) if DRAW_FEATURE_MAPS else -1 # 控制绘制特征图的位置
                 REGISTERED_HOOKS = False # 用来控制仅注册一次hook
