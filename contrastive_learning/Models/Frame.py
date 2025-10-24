@@ -214,7 +214,7 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
     if SWANLAB_AVAILABLE:
         swanlab.init(
             project="Contrastive_Learning",
-            experiment_name=f"{type(model).__name__}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            experiment_name=f"{type(model).__name__}_{type(model.encoder_q.encoder).__name__}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             config={
                 "model_name": type(model.encoder_q.encoder).__name__,
                 "init_learning_rate": optimizer.param_groups[0]['lr'],

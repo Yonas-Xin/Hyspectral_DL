@@ -18,8 +18,7 @@ except ImportError:
 
 class Cnn_Model_Frame:
     def __init__(self, model_name, min_lr=1e-7, epochs=300, device=None, if_full_cpu=True, 
-                 feature_map_layer_n=None, feature_map_num=12, feature_map_position=0,
-                 draw_single_channel=False):
+                 feature_map_layer_n=None, feature_map_num=12, feature_map_position=0,):
         self.loss_func = nn.CrossEntropyLoss()
         self.min_lr = min_lr
         self.epochs = epochs
@@ -59,7 +58,6 @@ class Cnn_Model_Frame:
         self.feature_map_layer_n = feature_map_layer_n
         self.feature_map_num = feature_map_num
         self.feature_map_position = feature_map_position
-        self.draw_single_channel = draw_single_channel
 
     def full_cpu(self):
         cpu_num = cpu_count()  # 自动获取最大核心数目
@@ -104,7 +102,7 @@ class Cnn_Model_Frame:
             self.feature_map_layer_n = [self.feature_map_layer_n[0], self.feature_map_layer_n[len(self.feature_map_layer_n) // 2], 
                                         self.feature_map_layer_n[-1]]  # 仅注册第一个、中间层与最后一个卷积层
         # 注册hook
-        self._register_input_hook(model)
+        # self._register_input_hook(model)
         for name, module in model.named_modules():
             if name in self.feature_map_layer_n:
                 self.hook_handles.append(module.register_forward_hook(
@@ -129,17 +127,13 @@ class Cnn_Model_Frame:
                 elif ndim == 4:
                     max_channel_features = min(feature_map.size(1), self.feature_map_num)
                     max_batch_features = min(feature_map.size(0), self.feature_map_num)
-                    if self.draw_single_channel:  # 绘制第一个图像的前12个通道图
-                        swanlab.log({f"feature_maps/{layer_name}": [swanlab.Image(img) for img in feature_map[0, :max_channel_features]]}, step=epoch)
-                    else:  # 绘制前12个图像的前三个通道假彩色图
-                        swanlab.log({f"feature_maps/{layer_name}": [swanlab.Image(img[:3]) for img in feature_map[:max_batch_features]]}, step=epoch)
+                    swanlab.log({f"feature_maps/{layer_name}_single_channel_maps": [swanlab.Image(img) for img in feature_map[0, :max_channel_features]]}, step=epoch) # 绘制第一个图像的前12个通道图
+                    swanlab.log({f"feature_maps/{layer_name}_batch_rgb_maps": [swanlab.Image(img[:3]) for img in feature_map[:max_batch_features]]}, step=epoch) # 绘制前12个图像的前三个通道假彩色图
                 elif ndim == 5:
                     max_channel_features = min(feature_map.size(1), self.feature_map_num)
                     max_batch_features = min(feature_map.size(0), self.feature_map_num)
-                    if self.draw_single_channel:  # 绘制第一个图像的前12个通道的前三个波段假彩色图
-                        swanlab.log({f"feature_maps/{layer_name}": [swanlab.Image(img[:3]) for img in feature_map[0, :max_channel_features]]}, step=epoch)
-                    else:  # 绘制前12个图像的第0个通道的前三个波段假彩色图
-                        swanlab.log({f"feature_maps/{layer_name}": [swanlab.Image(img[0, :3]) for img in feature_map[:max_batch_features]]}, step=epoch)
+                    swanlab.log({f"feature_maps/{layer_name}_single_channel_maps": [swanlab.Image(img[:3]) for img in feature_map[0, :max_channel_features]]}, step=epoch) # 绘制第一个图像的前12个通道的前三个波段假彩色图
+                    swanlab.log({f"feature_maps/{layer_name}_batch_rgb_maps": [swanlab.Image(img[0, :3]) for img in feature_map[:max_batch_features]]}, step=epoch) # 绘制前12个图像的第0个通道的前三个波段假彩色图
             else:
                 print(f"Feature map dimension: {ndim} not supported for visualization.")
         else:
@@ -273,6 +267,7 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 optimizer.step()
 
             DRAW_FEATURE_MAPS = True if (epoch % 20 == 0 or epoch == 1) and SWANLAB_AVAILABLE else False # 每20个epoch绘制一次特征图
+            DRAW_ORINGINAL_INPUT = True if DRAW_FEATURE_MAPS else False
             if eval_dataloader is not None:
                 DRAW_FEATURE_POSITION = int(frame.feature_map_position * len(eval_dataloader.dataset)) if DRAW_FEATURE_MAPS else -1 # 控制绘制特征图的位置
                 REGISTERED_HOOKS = False # 用来控制仅注册一次hook
@@ -287,6 +282,12 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                         if (idx+batchs) >= DRAW_FEATURE_POSITION and DRAW_FEATURE_MAPS and not REGISTERED_HOOKS: 
                             frame.register_hooks(model) # 仅注册一次hook
                             REGISTERED_HOOKS = True
+                            if DRAW_ORINGINAL_INPUT:
+                                max_channel_features = min(data.size(1), frame.feature_map_num)
+                                max_batch_features = min(data.size(0), frame.feature_map_num)
+                                swanlab.log({f"original_input/single_channel_map": [swanlab.Image(img) for img in data[0, :max_channel_features]]}) # 绘制原始输入图像
+                                swanlab.log({f"original_input/batch_rgb": [swanlab.Image(img[:3]) for img in data[:max_batch_features]]}) # 绘制原始输入图像
+                                DRAW_ORINGINAL_INPUT = False
                         data, label = data.to(frame.device), label.to(frame.device)
                         output = model(data)
                         _, preds = torch.max(output, 1)
