@@ -31,17 +31,25 @@ MODEL_DICT = {
     'ResNet50': ResNet50
 }
 
-model_selected = 'Common_1DCNN' # 从上面选择一个模型
+model_selected = 'ResNet18' # 从上面选择一个模型
 config_name = "SRACN-nopre" # 配置输出名称，最后的输出名称为 model_selected_config_name_CurrentTime
+train_images_dir = r'c:\Users\85002\Desktop\test\train_dataset\.datasets.txt'  # 训练数据集
+test_images_dir = r'c:\Users\85002\Desktop\test\test_dataset\.datasets.txt'  # 测试数据集
 out_classes = 11 # 分类数
-epochs = 300 # epoch
+
+
+epochs = 100 # epoch
 batch = 48 # batch
 init_lr = 3e-4  # lr
 min_lr = 3e-6  # 最低学习率
-pretrain_pth = r'C:\Users\85002\Downloads\Ete_spectral0_band0.5_noise0.5_Emb128_202508262224_best.pth'
-train_images_dir = r'c:\Users\85002\OneDrive\文档\小论文\dataset11classes\d6-4new\训练集\.datasets.txt'  # 训练数据集
-test_images_dir = r'c:\Users\85002\OneDrive\文档\小论文\dataset11classes\d6-4new\测试集\.datasets.txt'  # 测试数据集
+pretrain_pth = None
 ck_pth = None # 用于断点学习
+
+"""特征图绘制相关参数"""
+FEATURE_MAP_LAYER_NAMES = None # 指定需要绘制特征图的层名，使用列表形式，例如 ['encoder','layer1.0.conv1']，为None则绘制所有层
+FEATURE_MAP_NUM = 12 # 每个层绘制的特征图数量
+FEATURE_MAP_POSITION = 0.2 # 在测试集中的位置，范围0-1之间，例如0.5表示在测试集的中间位置绘制特征图(不能精确控制具体位置，只能大致控制)
+DRAW_SINGLE_CHANNEL = False  # 是否绘制单通道图像，False表示绘制前三个通道的假彩色图(多个样本), True表示绘制单通道图像(单个样本)
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # 显卡设置
     if_full_cpu = True  # 是否全负荷cpu
@@ -49,6 +57,7 @@ if __name__ == '__main__':
     out_embedding = 128
     step_size = epochs // (math.log10(init_lr // min_lr) + 1) # 自动计算学习率调度器的步长
     dataloader_num_workers = cpu_count() // 4 # 根据cpu核心数自动决定num_workers数量
+    # dataloader_num_workers = 1
     print(f'Using num_workers: {dataloader_num_workers}')
     # 配置训练数据集和模型
     train_image_lists = read_dataset_from_txt(train_images_dir) # 使用rewrite好点
@@ -75,7 +84,11 @@ if __name__ == '__main__':
                             epochs=epochs, 
                             min_lr=min_lr,
                             device=device, 
-                            if_full_cpu=if_full_cpu,)
+                            if_full_cpu=if_full_cpu,
+                            feature_map_layer_n=FEATURE_MAP_LAYER_NAMES,
+                            feature_map_num=FEATURE_MAP_NUM,
+                            feature_map_position=FEATURE_MAP_POSITION,
+                            draw_single_channel=DRAW_SINGLE_CHANNEL)
     
     train(frame=frame,
           model=model, 

@@ -784,7 +784,7 @@ def random_split_shp(input_shp, output_shp1, output_shp2, num_to_select, pixel_s
         print(f"已随机选择 {num_to_select} 个要素保存到: {output_shp1}")
         print(f"剩余 {total_features - num_to_select} 个要素保存到: {output_shp2}")
 
-def batch_random_split_shp(input_shp_dir, output_dir, num_to_select):
+def batch_random_split_shp(input_shp_dir, output_dir, num_to_select, pixel_size=29):
     """
     批量随机分割点Shapefile为两个新文件
     
@@ -809,12 +809,12 @@ def batch_random_split_shp(input_shp_dir, output_dir, num_to_select):
             base_name = os.path.basename(shp_file)[:-4]
             output_shp1 = os.path.join(output_dir1, f"{base_name}_part1.shp")
             output_shp2 = os.path.join(output_dir2, f"{base_name}_part2.shp")
-            random_split_shp(shp_file, output_shp1, output_shp2, num_to_select)
+            random_split_shp(shp_file, output_shp1, output_shp2, num_to_select, pixel_size=pixel_size)
     elif os.path.isfile(input_shp_dir):
         base_name = os.path.basename(input_shp_dir)[:-4]
         output_shp1 = os.path.join(output_dir, f"{base_name}_part1.shp")
         output_shp2 = os.path.join(output_dir, f"{base_name}_part2.shp")
-        random_split_shp(input_shp_dir, output_shp1, output_shp2, num_to_select)
+        random_split_shp(input_shp_dir, output_shp1, output_shp2, num_to_select, pixel_size=pixel_size)
     else:
         raise RuntimeError(f'Invalid input_shp_dir: {input_shp_dir}, it should be a directory or a shapefile path')
 
