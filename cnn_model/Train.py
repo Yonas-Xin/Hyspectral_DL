@@ -5,7 +5,7 @@ import torch
 import torch.optim as optim
 from cnn_model.Models.Models import SRACN, Common_1DCNN, Common_3DCNN, SSRN, HybridSN, Vgg16_net, MobileNetV1, \
                                     MobileNetV2, Common_2DCNN, ResNet18, Res_3D_18Net, Res_3D_34Net, Res_3D_50Net, \
-                                    ResNet34, ResNet50
+                                    ResNet34, ResNet50, spec_transformer
 from cnn_model.Models.Data import CNN_Dataset
 from torch.optim.lr_scheduler import StepLR
 from cnn_model.Models.Frame import Cnn_Model_Frame, train
@@ -28,25 +28,26 @@ MODEL_DICT = {
     'MobileNetV2': MobileNetV2,
     'ResNet18': ResNet18,
     'ResNet34': ResNet34,
-    'ResNet50': ResNet50
+    'ResNet50': ResNet50,
+    'spec_transformer': spec_transformer,
 }
 
-model_selected = 'Common_2DCNN' # 从上面选择一个模型
+model_selected = 'spec_transformer' # 从上面选择一个模型
 config_name = "Test" # 配置输出名称，最后的输出名称为 model_selected_config_name_CurrentTime
-train_images_dir = r'c:\Users\85002\Desktop\test\train_dataset\.datasets.txt'  # 训练数据集
-test_images_dir = r'c:\Users\85002\Desktop\test\test_dataset\.datasets.txt'  # 测试数据集
+train_images_dir = r'c:\Users\85002\Desktop\test\test\train_dataset\.datasets.txt'  # 训练数据集
+test_images_dir = r'c:\Users\85002\Desktop\test\test\test_dataset\.datasets.txt'  # 测试数据集
 out_classes = 11 # 分类数
 
 
-epochs = 100 # epoch
+epochs = 300 # epoch
 batch = 48 # batch
 init_lr = 3e-4  # lr
-min_lr = 3e-6  # 最低学习率
+min_lr = 3e-4  # 最低学习率
 pretrain_pth = None
 ck_pth = None # 用于断点学习
 
 """特征图绘制相关参数"""
-FEATURE_MAP_LAYER_NAMES = None # 指定需要绘制特征图的层名，使用列表形式，例如 ['encoder','layer1.0.conv1']，为None则绘制所有层
+FEATURE_MAP_LAYER_NAMES = [] # 指定需要绘制特征图的层名，使用列表形式，例如 ['encoder','layer1.0.conv1']，如果为空
 FEATURE_MAP_NUM = 12 # 每个层绘制的特征图数量
 FEATURE_MAP_POSITION = 0.2 # 在测试集中的位置，范围0-1之间，例如0.5表示在测试集的中间位置绘制特征图(不能精确控制具体位置，只能大致控制)
 if __name__ == '__main__':
@@ -73,7 +74,6 @@ if __name__ == '__main__':
     scheduler = StepLR(optimizer, step_size=step_size, gamma=0.1)  # 学习率调度器
     if step_size <= 0: # step太小,那么不设置调度器
         scheduler = None
-
     train_dataloader = DataLoader(train_dataset, batch_size=batch, shuffle=True, pin_memory=True, 
                                   num_workers=dataloader_num_workers, prefetch_factor=2,persistent_workers=True)  # 数据迭代器
     eval_dataloader = DataLoader(eval_dataset, batch_size=batch, shuffle=False, pin_memory=True, 

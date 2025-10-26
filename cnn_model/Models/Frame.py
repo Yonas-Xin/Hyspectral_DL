@@ -18,7 +18,7 @@ except ImportError:
 
 class Cnn_Model_Frame:
     def __init__(self, model_name, min_lr=1e-7, epochs=300, device=None, if_full_cpu=True, 
-                 feature_map_layer_n=None, feature_map_num=12, feature_map_position=0,):
+                 feature_map_layer_n=[], feature_map_num=12, feature_map_position=0,):
         self.loss_func = nn.CrossEntropyLoss()
         self.min_lr = min_lr
         self.epochs = epochs
@@ -94,8 +94,7 @@ class Cnn_Model_Frame:
     def register_hooks(self, model):
         """注册hook来捕获特征图, 不指定层名, 则默认注册第一个、中间层与最后一个卷积层"""
         # 如果未指定层名，自动获取卷积层
-        if self.feature_map_layer_n is None:
-            self.feature_map_layer_n = []
+        if not self.feature_map_layer_n: # 如果层名为空
             for name, module in model.named_modules(): # 返回所有模块的名称和模块本身
                 if isinstance(module, (nn.Conv2d, nn.Conv1d, nn.Conv3d)):
                     self.feature_map_layer_n.append(name)
@@ -114,7 +113,7 @@ class Cnn_Model_Frame:
             self._draw_feature_maps(epoch)  # 移除前先绘制特征图
             for handle in self.hook_handles:
                 handle.remove()
-            self.hook_handles = []
+            self.hook_handles.clear()
             self.feature_maps.clear()
     
     def _draw_feature_maps(self, epoch):
@@ -134,8 +133,8 @@ class Cnn_Model_Frame:
                     max_batch_features = min(feature_map.size(0), self.feature_map_num)
                     swanlab.log({f"feature_maps/{layer_name}_single_channel_maps": [swanlab.Image(img[:3]) for img in feature_map[0, :max_channel_features]]}, step=epoch) # 绘制第一个图像的前12个通道的前三个波段假彩色图
                     swanlab.log({f"feature_maps/{layer_name}_batch_rgb_maps": [swanlab.Image(img[0, :3]) for img in feature_map[:max_batch_features]]}, step=epoch) # 绘制前12个图像的第0个通道的前三个波段假彩色图
-            else:
-                print(f"Feature map dimension: {ndim} not supported for visualization.")
+                else:
+                    print(f"Feature map dimension: {ndim} not supported for visualization.")
         else:
             print("No feature maps to draw.")
 
@@ -266,8 +265,8 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 loss.backward()
                 optimizer.step()
 
-            DRAW_FEATURE_MAPS = True if (epoch % 20 == 0 or epoch == 1) and SWANLAB_AVAILABLE else False # 每20个epoch绘制一次特征图
-            DRAW_ORINGINAL_INPUT = True if DRAW_FEATURE_MAPS else False
+            DRAW_FEATURE_MAPS = True if (epoch % 20 == 0 or epoch == 1) and SWANLAB_AVAILABLE and model.if_draw_feature_map() else False # 每20个epoch绘制一次特征图
+            DRAW_ORINGINAL_INPUT = True if SWANLAB_AVAILABLE else False
             if eval_dataloader is not None:
                 DRAW_FEATURE_POSITION = int(frame.feature_map_position * len(eval_dataloader.dataset)) if DRAW_FEATURE_MAPS else -1 # 控制绘制特征图的位置
                 REGISTERED_HOOKS = False # 用来控制仅注册一次hook
@@ -279,9 +278,10 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                     for data, label in tqdm(eval_dataloader, desc='Testing ', total=len(eval_dataloader), leave=True):
                         batchs = data.size(0)
                         frame.remove_hooks(epoch)  # 移除hook
-                        if (idx+batchs) >= DRAW_FEATURE_POSITION and DRAW_FEATURE_MAPS and not REGISTERED_HOOKS: 
-                            frame.register_hooks(model) # 仅注册一次hook
-                            REGISTERED_HOOKS = True
+                        if (idx+batchs) >= DRAW_FEATURE_POSITION: 
+                            if DRAW_FEATURE_MAPS and not REGISTERED_HOOKS:
+                                frame.register_hooks(model) # 仅注册一次hook
+                                REGISTERED_HOOKS = True
                             if DRAW_ORINGINAL_INPUT:
                                 max_channel_features = min(data.size(1), frame.feature_map_num)
                                 max_batch_features = min(data.size(0), frame.feature_map_num)

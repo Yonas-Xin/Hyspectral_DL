@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import math
-
+from cnn_model.Models.Spec_Transformer import VisionTransformer
 class Res_3D_18Net_encoder(nn.Module):
     def __init__(self, layers_nums=18, out_embedding=1024, in_shape=None):
         super().__init__()

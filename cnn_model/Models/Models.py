@@ -21,7 +21,9 @@ class My_Model(nn.Module):
         
         for param in self.encoder.fc.parameters():
             param.requires_grad = True # encoder 的fc层需要正常梯度传播
-        
+    
+    def if_draw_feature_map(self):
+        return True
 
     def _load_encoer_params(self, state_dict):
         try:
@@ -128,6 +130,9 @@ class Common_1DCNN(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
+    
+    def if_draw_feature_map(self):
+        return False
 
 class Common_2DCNN(My_Model):
     '''浅层1D CNN模型'''
@@ -296,7 +301,6 @@ class ResNet34(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
 class ResNet50(My_Model):
     def __init__(self, out_classes, out_embedding=128, in_shape=None):
         super().__init__()
@@ -310,6 +314,26 @@ class ResNet50(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
+    
+class spec_transformer(My_Model):
+    def __init__(self, out_classes, out_embedding=128, in_shape=None):
+        super().__init__()
+        if in_shape is None:
+            raise ValueError("in_shape must be provided for the model.")
+        self.encoder = VisionTransformer(in_shape)
+        self.decoder = nn.Linear(self.encoder.hidden_size, out_classes)
+
+    def forward(self, x):
+        if x.dim() != 4:
+            raise ValueError(f"Expected input dimension 4 or 5, but got {x.dim()}")
+        elif x.dim() == 5:
+            x = x.squeeze(1)  # 增加一个维度到 [B, 1, C, H, W]
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+    
+    def if_draw_feature_map(self):
+        return False
 MODEL_DICT = {
     'SRACN':SRACN,
     'Shallow_1DCNN':Common_1DCNN,
