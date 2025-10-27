@@ -127,7 +127,7 @@ class Cnn_Model_Frame:
                     max_channel_features = min(feature_map.size(1), self.feature_map_num)
                     max_batch_features = min(feature_map.size(0), self.feature_map_num)
                     swanlab.log({f"feature_maps/{layer_name}_single_channel_maps": [swanlab.Image(img) for img in feature_map[0, :max_channel_features]]}, step=epoch) # 绘制第一个图像的前12个通道图
-                    swanlab.log({f"feature_maps/{layer_name}_batch_rgb_maps": [swanlab.Image(img[:3]) for img in feature_map[:max_batch_features]]}, step=epoch) # 绘制前12个图像的前三个通道假彩色图
+                    swanlab.log({f"feature_maps/{layer_name}_batch_rgb_maps": [swanlab.Image(pca_torch(img)) for img in feature_map[:max_batch_features]]}, step=epoch) # 绘制前12个图像的前三个通道假彩色图
                 elif ndim == 5:
                     max_channel_features = min(feature_map.size(1), self.feature_map_num)
                     max_batch_features = min(feature_map.size(0), self.feature_map_num)
@@ -137,6 +137,22 @@ class Cnn_Model_Frame:
                     print(f"Feature map dimension: {ndim} not supported for visualization.")
         else:
             print("No feature maps to draw.")
+
+def pca_torch(tensor):
+    """
+    使用PyTorch的SVD实现PCA，将多通道(c,h,w)张量降维为(3,h,w)
+    这个版本更高效，不需要在numpy和torch之间转换
+    """
+    if len(tensor.shape) != 3:
+        raise ValueError(f"输入张量应该是3维的(c,h,w)，但得到的是{tensor.shape}")
+    c, h, w = tensor.shape
+    x = tensor.view(c, -1)  # (c, h*w)
+    x_centered = x - x.mean(dim=1, keepdim=True)
+    U, S, V = torch.svd(x_centered.T)  # V的形状是(c, c)
+    components = V[:, :3]  # (c, 3)
+    reduced = x_centered.T @ components  # (h*w, 3)
+    reduced_tensor = reduced.T.view(3, h, w)
+    return reduced_tensor
 
 def get_leaf_layers_info(model):
     """
@@ -247,6 +263,7 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
     progress_writer = ProgressMeter(frame.epochs, len(train_dataloader), 
                                     [train_loss_note, train_acc_note, test_loss_note, test_acc_note],
                                     prefix="Batch")
+    DRAW_ORINGINAL_INPUT = True if SWANLAB_AVAILABLE else False
     try:
         for epoch in range(frame.start_epoch+1, frame.epochs+1):
             formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -266,7 +283,6 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 optimizer.step()
 
             DRAW_FEATURE_MAPS = True if (epoch % 20 == 0 or epoch == 1) and SWANLAB_AVAILABLE and model.if_draw_feature_map() else False # 每20个epoch绘制一次特征图
-            DRAW_ORINGINAL_INPUT = True if SWANLAB_AVAILABLE else False
             if eval_dataloader is not None:
                 DRAW_FEATURE_POSITION = int(frame.feature_map_position * len(eval_dataloader.dataset)) if DRAW_FEATURE_MAPS else -1 # 控制绘制特征图的位置
                 REGISTERED_HOOKS = False # 用来控制仅注册一次hook
