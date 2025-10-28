@@ -9,16 +9,20 @@ from multiprocessing import cpu_count
 import torch
 import traceback
 from utils import AverageMeter, ProgressMeter, topk_accuracy
+import numpy as np
 
-try: # 使用swanlab进行试验管理
+try: # 使用swanlab进行实验管理
     import swanlab
+    from pytorch_grad_cam import GradCAM
+    from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+    from pytorch_grad_cam.utils.image import show_cam_on_image
     SWANLAB_AVAILABLE = True
 except ImportError:
     SWANLAB_AVAILABLE = False
 
 class Contrastive_Frame:
     def __init__(self, augment, model_name, min_lr=1e-7, epochs=300, device=None, if_full_cpu=True
-                 ,feature_map_layer_n=None, feature_map_num=12):
+                 ,feature_map_layer_n=None, feature_map_num=12, feature_map_interval=10):
         self.augment = augment
         self.loss = nn.CrossEntropyLoss()
         self.min_lr = min_lr
@@ -49,10 +53,9 @@ class Contrastive_Frame:
         self.epoch_max_acc = -1
         self.start_epoch = 0
 
-        self.feature_maps = {}  # 存储特征图
-        self.hook_handles = []  # 存储hook句柄
         self.feature_map_layer_n = feature_map_layer_n
         self.feature_map_num = feature_map_num
+        self.feature_map_interval = feature_map_interval
 
     def full_cpu(self):
         cpu_num = cpu_count()  # 自动获取最大核心数目
@@ -71,70 +74,66 @@ class Contrastive_Frame:
         if SWANLAB_AVAILABLE:
             if self.feature_map_layer_n is not None: # 检查指定的绘制特征图的层名是否存在于模型中
                 for name in self.feature_map_layer_n:
-                    if name not in dict(model.named_modules()).keys():
-                        raise ValueError(f"Layer name '{name}' not found in the model's modules. The available layers are:\n {list(model.named_modules().keys())}")
+                    if name not in dict(model.encoder_q.named_modules()).keys():
+                        raise ValueError(f"Layer name '{name}' not found in the model's modules. \
+                                         The available layers are:\n {list(model.encoder_q.named_modules().keys())}")
 
-    def _hook_fn(self, module, input, output, layer_name=None):
-        """Hook函数，用于捕获特征图"""
-        self.feature_maps[layer_name] = output.detach().cpu()  # 将特征图存储到字典中
+    def _reshape_transform_3d(self, tensor):    
+        # 输入可能是 [N, C, D, H, W]，对 D 维做平均，返回 [N, C, H, W]
+        if tensor.ndim == 5:
+            return tensor.mean(dim=2)
+        return tensor
 
-    def register_hooks(self, model):
-        """注册hook来捕获特征图, 不指定层名, 则默认注册第一个、中间层与最后一个卷积层"""
-        # 如果未指定层名，自动获取卷积层
-        if self.feature_map_layer_n is None:
-            self.feature_map_layer_n = []
-            q_feature_map_layer_n = []
-            k_feature_map_layer_n = []
-            for name, module in model.named_modules(): # 返回所有模块的名称和模块本身
-                if isinstance(module, (nn.Conv2d, nn.Conv1d, nn.Conv3d)):
-                    if 'encoder_q' in name:
-                        q_feature_map_layer_n.append(name)
-                    else:
-                        k_feature_map_layer_n.append(name)
-            q_feature_map_layer_n = [q_feature_map_layer_n[0], q_feature_map_layer_n[len(q_feature_map_layer_n) // 2], 
-                                    q_feature_map_layer_n[-1]]  # 仅注册第一个、中间层与最后一个卷积层
-            k_feature_map_layer_n = [k_feature_map_layer_n[0], k_feature_map_layer_n[len(k_feature_map_layer_n) // 2], 
-                                    k_feature_map_layer_n[-1]]  # 仅注册第一个、中间层与最后一个卷积层
-            self.feature_map_layer_n = q_feature_map_layer_n + k_feature_map_layer_n
-
-        # 注册hook
-        for name, module in model.named_modules():
-            if name in self.feature_map_layer_n:
-                self.hook_handles.append(module.register_forward_hook(
-                    lambda m, i, o, layer_name=name: self._hook_fn(m, i, o, layer_name=layer_name))) # 保存hook句柄以便后续移除
-                
-    def remove_hooks(self, epoch):
-        """移除所有注册的hook与特征图"""
-        if self.hook_handles:
-            self._draw_feature_maps(epoch)  # 移除前先绘制特征图
-            for handle in self.hook_handles:
-                handle.remove()
-            self.hook_handles = []
-            self.feature_maps.clear()
-    
-    def _draw_feature_maps(self, epoch):
-        """绘制并保存特征图"""
-        if self.feature_maps:
-            for layer_name, feature_map in self.feature_maps.items():
-                encoder = 'encoder_q' if 'encoder_q' in layer_name else 'encoder_k'
-                name = layer_name[9:]
-                ndim = feature_map.ndim
-                if ndim not in [4, 5]:
-                    pass
-                elif ndim == 4: # 2D卷积特征图, 同时绘制单通道图（单样本）与前三个通道的假彩色图（多样本）
-                    max_channel_features = min(feature_map.size(1), self.feature_map_num)
-                    max_batch_features = min(feature_map.size(0), self.feature_map_num)
-                    swanlab.log({f"feature_maps_{encoder}/{name}_single_band": [swanlab.Image(img) for img in feature_map[0, :max_channel_features]]}, step=epoch)
-                    swanlab.log({f"feature_maps_{encoder}/{name}_band_rgb": [swanlab.Image(img[:3]) for img in feature_map[:max_batch_features]]}, step=epoch)
-                elif ndim == 5: # 3D卷积特征图, 同时绘制单通道图（单样本）与前三个通道的假彩色图（多样本）
-                    max_channel_features = min(feature_map.size(1), self.feature_map_num)
-                    max_batch_features = min(feature_map.size(0), self.feature_map_num)
-                    swanlab.log({f"feature_maps_{encoder}/{name}_single_channel": [swanlab.Image(img[:3]) for img in feature_map[0, :max_channel_features]]}, step=epoch)
-                    swanlab.log({f"feature_maps_{encoder}/{name}_single_channel_band_rgb": [swanlab.Image(img[0, :3]) for img in feature_map[:max_batch_features]]}, step=epoch)
+    def draw_feature_maps(self, model, data_list, epoch):
+        """绘制并保存特征图, model必须是encoder_q"""
+        train_mode = model.training
+        model.eval()
+        data = data_list[0]
+        max_batch_features = min(data.size(0), self.feature_map_num)
+        data = data[:max_batch_features] # 仅使用前N个图像绘制特征图
+        module_dict = dict(model.named_modules())
+        if not self.feature_map_layer_n: # 如果目标层为空
+            feature_map_layer_n = []
+            for name, module in module_dict.items(): # 返回所有模块的名称和模块本身
+                if isinstance(module, (nn.Conv2d, nn.Conv3d)):
+                    feature_map_layer_n.append(name)
+            if len(feature_map_layer_n) > 2: # 如果层数过多，则只取前三层、中间层、最后一层
+                self.feature_map_layer_n = [feature_map_layer_n[0], feature_map_layer_n[len(feature_map_layer_n) // 2], feature_map_layer_n[-1]]
             else:
-                print(f"Feature map dimension: {ndim} not supported for visualization.")
-        else:
-            print("No feature maps to draw.")
+                self.feature_map_layer_n = [] 
+
+        for layer_name in self.feature_map_layer_n: # 对每个指定层绘制GradCAM
+            target_layer = [module_dict[layer_name]]
+            cam = GradCAM(model=model, target_layers=target_layer, reshape_transform=self._reshape_transform_3d)
+            grayscale_cam = cam(input_tensor=data) # targets默认为None，自动指定模型预测概率最大的类
+            visualization_list = []
+            for i in range(max_batch_features):
+                input_img = data[i].cpu().numpy().transpose(1,2,0)  # 转换为 (H,W,C)
+                input_img = stretch_img(input_img[:,:,:3])  # 拉伸到0-1范围
+                visualization = show_cam_on_image(input_img, grayscale_cam[i], use_rgb=True)
+                visualization_list.append(visualization)
+            swanlab.log({f"GradCAMgray/{layer_name}": [swanlab.Image((grayscale_cam[i] * 255).astype(np.uint8))
+                                                       for i in range(max_batch_features)]}, step=epoch) # 绘制前N个图像的GradCAM灰度图
+            swanlab.log({f"GradCAMoverlay/{layer_name}": [swanlab.Image(visualization_list[i])
+                                                          for i in range(max_batch_features)]}, step=epoch)
+        if train_mode:
+            model.train()
+
+def stretch_img(arr):
+    """将输入的numpy数组按通道拉伸为0-1的np.float32格式
+    arr: np.ndarray, (H,W) or (H, W, 3)"""
+    arr = arr.astype(np.float32)
+    if arr.ndim == 3:  # (C,H,W)
+        min_val = arr.min(axis=(0, 1), keepdims=True)
+        max_val = arr.max(axis=(0, 1), keepdims=True)
+        stretched = (arr - min_val) / (max_val - min_val + 1e-8)
+    elif arr.ndim == 2:  # (H,W)
+        min_val = arr.min()
+        max_val = arr.max()
+        stretched = (arr - min_val) / (max_val - min_val + 1e-8)
+    else:
+        raise ValueError(f"Unsupported array shape: {arr.shape}")
+    return stretched
 
 def save_model(frame, model, optimizer, scheduler, epoch=None, avg_loss=None, avg_acc=None, is_best=False):
     """注意：将需要迁移的部分使用 backbone 存储起来"""
@@ -211,6 +210,7 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                 log_writer.close()
         except:pass
     
+    frame.check_input(model)
     if SWANLAB_AVAILABLE:
         swanlab.init(
             project="Contrastive_Learning",
@@ -253,14 +253,12 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                     k = frame.augment(block)
                 if not samples_draw and SWANLAB_AVAILABLE: # 仅在第一个epoch保存样本用于绘图
                     samples_draw.append(block.detach().cpu())
-                    samples_draw.append(q.detach().cpu())
-                    samples_draw.append(k.detach().cpu())
                     max_draw_samples = min(batchs, frame.feature_map_num)
-                    swanlab.log( # 绘制样本图像
+                    swanlab.log(
                     {
                         "samples/original": [swanlab.Image(img[:3]) for img in samples_draw[0][:max_draw_samples]],
-                        "samples/augmented_q": [swanlab.Image(img[:3]) for img in samples_draw[1][:max_draw_samples]],
-                        "samples/augmented_k": [swanlab.Image(img[:3]) for img in samples_draw[2][:max_draw_samples]],
+                        "samples/augmented_q": [swanlab.Image(img[:3]) for img in q.detach()[:max_draw_samples]],
+                        "samples/augmented_k": [swanlab.Image(img[:3]) for img in k.detach()[:max_draw_samples]],
                     })
                 optimizer.zero_grad()  # 清空梯度
                 logits, label = model(q, k)
@@ -275,13 +273,9 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                 if (i+1) % interval_printinfo == 0:
                     Epoch_wirter.display(i+1)
 
-            DRAW_FEATURE_MAPS = True if (epoch % 10 == 0 or epoch == 1) and SWANLAB_AVAILABLE else False # 每10个epoch绘制一次特征图
+            DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE else False
             if DRAW_FEATURE_MAPS:
-                frame.register_hooks(model)
-                with torch.no_grad():
-                    model.eval()
-                    _ = model(samples_draw[1].to(frame.device), samples_draw[2].to(frame.device))  # 前向传播以捕获特征图
-                frame.remove_hooks(epoch) # 绘制特征图并移除hooks
+                frame.draw_feature_maps(model.encoder_q, samples_draw, epoch)
             
             dataloader.dataset.reset()
             current_lr = optimizer.param_groups[0]['lr']

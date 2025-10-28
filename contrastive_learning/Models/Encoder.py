@@ -47,7 +47,7 @@ class Contrastive_Model(nn.Module):
         """
         super().__init__()
         self.encoder = ENCODER_DICT[encoder_model_name](out_embedding=out_embedding, in_shape=in_shape)
-        self.decoder = Contrastive_Decoder(out_embedding, 128, mid_channels=128)
+        self.decoder = Contrastive_Decoder(out_embedding, 1024, mid_channels=1024)
         self.dim = DIM_DICT[encoder_model_name]
     def forward(self, x):
         # 输入数据有以下两种形式: [B, bands], [B, C, H, W], [B, 1, C, H, W]
