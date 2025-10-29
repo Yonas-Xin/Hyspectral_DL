@@ -1,7 +1,7 @@
 import torch
 from cnn_model.Models.Encoder import SRACN_Encoder, Res_3D_18Net_encoder, Res_3D_50Net_encoder, Res_3D_34Net_encoder, ResNet18_encoder, \
                                     ResNet34_encoder, ResNet50_encoder, SSRN_encoder, Vgg16_encoder, HybridSN_encoder, Common_1DCNN_Encoder, \
-                                    Common_2DCNN_Encoder, Common_3DCNN_Encoder, MobileNetV1_encoder, MobileNetV2_encoder
+                                    Common_2DCNN_Encoder, Common_3DCNN_Encoder, MobileNetV1_encoder, MobileNetV2_encoder, SpecTransformer_encoder
 from contrastive_learning.Models.Decoder import *
 
 ENCODER_DICT = {
@@ -19,7 +19,8 @@ ENCODER_DICT = {
     'MobileNetV2': MobileNetV2_encoder,
     'ResNet18': ResNet18_encoder,
     'ResNet34': ResNet34_encoder,
-    'ResNet50': ResNet50_encoder
+    'ResNet50': ResNet50_encoder,
+    'spec_transformer': SpecTransformer_encoder,
 }
 
 DIM_DICT = {
@@ -37,18 +38,58 @@ DIM_DICT = {
     'MobileNetV2': 4,
     'ResNet18': 4,
     'ResNet34': 4,
-    'ResNet50': 4
+    'ResNet50': 4,
+    'spec_transformer': 4
 }
 
+IN_CHANNELS = {
+    'SRACN':512,
+    'Common_1DCNN': 512,
+    'Common_2DCNN': 512,
+    'Common_3DCNN': 512,
+    "Res_3D_18Net": 512,
+    "Res_3D_34Net": 512,
+    "Res_3D_50Net": 512 * 4,
+    'SSRN': 28,
+    'HybridSN': 256,
+    'Vgg16': 512,
+    'MobileNetV1': 1024,
+    'MobileNetV2': 1280,
+    'ResNet18': 512,
+    'ResNet34': 512,
+    'ResNet50': 512 * 4,
+    'spec_transformer': 768
+}
+
+FEATURE_MAPS = {
+    'SRACN':True,
+    'Common_1DCNN': False,
+    'Common_2DCNN': True,
+    'Common_3DCNN': True,
+    "Res_3D_18Net": True,
+    "Res_3D_34Net": True,
+    "Res_3D_50Net": True,
+    'SSRN': True,
+    'HybridSN': True,
+    'Vgg16': True,
+    'MobileNetV1': True,
+    'MobileNetV2': True,
+    'ResNet18': True,
+    'ResNet34': True,
+    'ResNet50': True,
+    'spec_transformer': False
+}
 class Contrastive_Model(nn.Module):
-    def __init__(self, encoder_model_name, out_embedding=1024, in_shape=None):
+    def __init__(self, encoder_model_name, in_shape=None):
         """
         encoder_model_name: str encoder模型的名称
         """
         super().__init__()
-        self.encoder = ENCODER_DICT[encoder_model_name](out_embedding=out_embedding, in_shape=in_shape)
-        self.decoder = Contrastive_Decoder(out_embedding, 1024, mid_channels=1024)
+        self.encoder = ENCODER_DICT[encoder_model_name](in_shape=in_shape)
+        self.decoder = Contrastive_Decoder(IN_CHANNELS[encoder_model_name], 1024, mid_channels=1024)
         self.dim = DIM_DICT[encoder_model_name]
+        self.embedding_dim = IN_CHANNELS[encoder_model_name]
+        self.if_draw_feature_maps = FEATURE_MAPS[encoder_model_name]
     def forward(self, x):
         # 输入数据有以下两种形式: [B, bands], [B, C, H, W], [B, 1, C, H, W]
         if x.dim() == 2:

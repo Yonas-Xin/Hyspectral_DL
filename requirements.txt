@@ -6,4 +6,5 @@ spectral==0.24
 scikit-learn==1.7.2
 gdal==3.11.0
 kornia==0.8.0
+grad_cam==1.5.5
 # conda install -c conda-forge gdal==3.11.0

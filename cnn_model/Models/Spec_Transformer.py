@@ -195,9 +195,9 @@ class Transformer(nn.Module):
         return encoded
     
 
-class VisionTransformer(nn.Module):
+class SpecTransformer(nn.Module):
     def __init__(self, img_size, config=get_configs()):
-        super(VisionTransformer, self).__init__()
+        super(SpecTransformer, self).__init__()
         self.transformer = Transformer(img_size, config)
         self.hidden_size = config['hidden_size']
 
@@ -207,6 +207,6 @@ class VisionTransformer(nn.Module):
         
 if __name__ == "__main__":
     x = torch.randn(2, 166, 64, 64)
-    model = VisionTransformer(hidden_size=768, img_size=(166, 64, 64), num_classes=10)
+    model = SpecTransformer(img_size=(166, 64, 64))
     x = model(x)
     print(x.shape)

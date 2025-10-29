@@ -210,6 +210,8 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
         best_result = f'{formatted_time} Model saved at Epoch {model_save_epoch}. \
             The best training_acc:{best_train_accuracy:.4f}%. The best testing_acc:{best_test_accuracy:.4f}%.'
         if SWANLAB_AVAILABLE:
+            model = torch.load(frame.model_best_path_pt, map_location=frame.device, weights_only=False)  # 加载最佳模型
+            frame.gradcam_feature_maps(model, BATCH_IMGS, epoch+1)  # 绘制最佳模型的特征图
             pass
             # matrics = swanlab.confusion_matrix(frame.best_all_labels, frame.best_all_preds, class_names=None) # 生成混淆矩阵,这个函数有问题，等修复
             # swanlab.log({"confusion_matrix_custom": matrics})
@@ -304,11 +306,8 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
             train_accuracy = train_acc_note.avg
             train_avg_loss = train_loss_note.avg
             current_lr = optimizer.param_groups[0]['lr']
-            if current_lr <= frame.min_lr:
-                pass
-            else:
-                if scheduler is not None:
-                    scheduler.step()
+            if scheduler is not None:
+                scheduler.step()
             result = progress_writer.epoch_summary(epoch, f"Lr: {current_lr:.2e}")
             if SWANLAB_AVAILABLE:
                 swanlab.log({"Train/loss":train_avg_loss}, step=epoch)

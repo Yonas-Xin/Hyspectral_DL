@@ -1,57 +1,47 @@
-"""Attention: 为了统一初始化参数, 所有模型都必须有out_embedding in_shape作为初始化数据"""
+"""Attention: 为了统一初始化参数, 所有模型都必须有in_shape作为初始化数据"""
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import math
-from cnn_model.Models.Spec_Transformer import VisionTransformer
+from cnn_model.Models.Spec_Transformer import SpecTransformer
 class Res_3D_18Net_encoder(nn.Module):
-    def __init__(self, layers_nums=18, out_embedding=1024, in_shape=None):
+    def __init__(self, layers_nums=18, in_shape=None):
         super().__init__()
-        self.net = ResNet_3D(layers_nums, out_embedding=out_embedding)
+        self.net = ResNet_3D(layers_nums)
         self.avgpool = nn.AdaptiveAvgPool3d((1,1,1))
-        self.fc = nn.Linear(512 * self.net.expansion, out_embedding)
-    
+
     def forward(self, x):
         x = self.net(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
         return x
 
 class Res_3D_34Net_encoder(nn.Module):
-    def __init__(self, layers_nums=34, out_embedding=1024, in_shape=None):
+    def __init__(self, layers_nums=34, in_shape=None):
         super().__init__()
-        self.net = ResNet_3D(layers_nums, out_embedding=out_embedding)
+        self.net = ResNet_3D(layers_nums)
         self.avgpool = nn.AdaptiveAvgPool3d((1,1,1))
-        self.fc = nn.Linear(512 * self.net.expansion, out_embedding)
     
     def forward(self, x):
         x = self.net(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
         return x
 
 class Res_3D_50Net_encoder(nn.Module):
-    def __init__(self, layers_nums=50, out_embedding=1024, in_shape=None):
+    def __init__(self, layers_nums=50, in_shape=None):
         super().__init__()
-        self.net = ResNet_3D(layers_nums, out_embedding=out_embedding)
+        self.net = ResNet_3D(layers_nums)
         self.avgpool = nn.AdaptiveAvgPool3d((1,1,1))
-        self.fc = nn.Linear(512 * self.net.expansion, out_embedding)
     
     def forward(self, x):
         x = self.net(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
         return x
 
 class ResNet18_encoder(nn.Module):
-    def __init__(self, layers_nums=18, out_embedding=1024, in_shape=None):
+    def __init__(self, layers_nums=18, in_shape=None):
         super().__init__()
-        self.net = ResNet_2D(layers_nums, out_embedding==out_embedding, in_shape=in_shape)
+        self.net = ResNet_2D(layers_nums, in_shape=in_shape)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Linear(512 * self.net.expansion, out_embedding)
     
     def forward(self, x):
         x = self.net(x)
@@ -59,16 +49,13 @@ class ResNet18_encoder(nn.Module):
             pass
         else:
             x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
         return x
 
 class ResNet34_encoder(nn.Module):
-    def __init__(self, layers_nums=34, out_embedding=1024, in_shape=None):
+    def __init__(self, layers_nums=34, in_shape=None):
         super().__init__()
-        self.net = ResNet_2D(layers_nums, out_embedding=out_embedding, in_shape=in_shape)
+        self.net = ResNet_2D(layers_nums, in_shape=in_shape)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Linear(512 * self.net.expansion, out_embedding)
     
     def forward(self, x):
         x = self.net(x)
@@ -76,16 +63,13 @@ class ResNet34_encoder(nn.Module):
             pass
         else:
             x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
         return x
 
 class ResNet50_encoder(nn.Module):
-    def __init__(self, layers_nums=50, out_embedding=1024, in_shape=None):
+    def __init__(self, layers_nums=50, in_shape=None):
         super().__init__()
-        self.net = ResNet_2D(layers_nums, out_embedding=out_embedding, in_shape=in_shape)
+        self.net = ResNet_2D(layers_nums, in_shape=in_shape)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Linear(512 * self.net.expansion, out_embedding)
     
     def forward(self, x):
         x = self.net(x)
@@ -93,12 +77,10 @@ class ResNet50_encoder(nn.Module):
             pass
         else:
             x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
         return x
     
 class ResNet_3D(nn.Module): # 不包含平均池化层与线性映射层
-    def __init__(self, layers_nums, out_embedding=1024):
+    def __init__(self, layers_nums):
         super(ResNet_3D, self).__init__()
         block, layers = self._cal_layers(layers_nums)
         self.expansion = block.expansion
@@ -170,7 +152,7 @@ class ResNet_3D(nn.Module): # 不包含平均池化层与线性映射层
         return x
 
 class ResNet_2D(nn.Module): # 不包含平均池化层与线性映射层
-    def __init__(self, layer_nums, out_embedding=128, in_shape=None):
+    def __init__(self, layer_nums, in_shape=None):
         super(ResNet_2D, self).__init__()
         block, layers = self._cal_layers(layer_nums)
         self.expansion = block.expansion
@@ -248,7 +230,7 @@ class ResNet_2D(nn.Module): # 不包含平均池化层与线性映射层
 
 class SRACN_Encoder(nn.Module): # 以前训练的时候这里的类名为: Spe_Spa_Attenres_Encoder
     '''6个残差块和一个卷积块'''
-    def __init__(self, out_embedding=1024, in_shape=None):
+    def __init__(self, in_shape=None):
         super().__init__()
         bands, H, W = in_shape
         self.spectral_attention = ECA_SpectralAttention_3d(bands, 2, 1)# 光谱注意力
@@ -261,7 +243,6 @@ class SRACN_Encoder(nn.Module): # 以前训练的时候这里的类名为: Spe_S
         self.res_block5 = Residual_block(256, 256, (3,3,3), (1,1,1), 1)
         self.res_block6 = Residual_block(256, 512, (3,3,3), (1,1,1), (2,1,1)) # stride=2
         self.avg_pool = nn.AdaptiveAvgPool3d((1,1,1)) # 立方体压缩
-        self.fc = nn.Linear(512, out_features=out_embedding)
     def forward(self, x):
         x = self.spectral_attention(x)
         x = self.pool(self.conv_block(x))
@@ -271,11 +252,10 @@ class SRACN_Encoder(nn.Module): # 以前训练的时候这里的类名为: Spe_S
         x = self.res_block4(x)
         x = self.res_block5(x)
         x = self.avg_pool(self.res_block6(x))
-        x = x.view(x.shape[0], -1)
-        return self.fc(x)
+        return x
 
 class Common_3DCNN_Encoder(nn.Module):
-    def __init__(self, out_embedding=128, in_shape=None):
+    def __init__(self, in_shape=None):
         super().__init__()
         self.conv1 = Common_3d(1, 64, kernel_size=3, padding=1, stride=(2,1,1))
         self.pool1 = nn.MaxPool3d(kernel_size=2, stride=2)
@@ -283,18 +263,16 @@ class Common_3DCNN_Encoder(nn.Module):
         self.conv3 = Common_3d(128, 256, kernel_size=(3,3,3), padding=(1,1,1), stride=(2,1,1))
         self.conv4 = Common_3d(256, 512, kernel_size=(3,3,3), padding=(1,1,1), stride=(2,1,1))
         self.pool2 = nn.AdaptiveAvgPool3d((1,1,1))
-        self.fc = nn.Linear(512, out_features=out_embedding)
      
     def forward(self, x):
         x = self.pool1(self.conv1(x))
         x = self.conv2(x)
         x = self.conv3(x)
         x = self.pool2(self.conv4(x))
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
+        return x
 
 class Common_1DCNN_Encoder(nn.Module):
-    def __init__(self, out_embedding=1024, in_shape=None):
+    def __init__(self, in_shape=None):
         super().__init__()
         self.conv1 = Common_1d(1, 64, kernel_size=7, padding=3, stride=2)
         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
@@ -306,8 +284,6 @@ class Common_1DCNN_Encoder(nn.Module):
         self.conv4_2 = Common_1d(512, 512, kernel_size=3, padding=1, stride=2)
         self.pool3 = nn.AdaptiveAvgPool1d((1))
 
-        self.fc = nn.Linear(512, out_embedding)
-
     def forward(self, x):
         # 输入尺寸 [B, 1, L]
         x = self.conv1(x)
@@ -316,11 +292,10 @@ class Common_1DCNN_Encoder(nn.Module):
         x = self.conv3_2(self.conv3_1(x))
         x = self.conv4_2(self.conv4_1(x))
         x = self.pool3(x)         # [B, 128, 1]
-        x = x.view(x.size(0), -1) # [B, 128]
-        return self.fc(x)
+        return x
     
 class Common_2DCNN_Encoder(nn.Module):
-    def __init__(self, out_embedding=128, in_shape=None):
+    def __init__(self, in_shape=None):
         super().__init__()
         bands, _, _ = in_shape
         self.conv1 = Common_2d(bands, 64, kernel_size=3, padding=1, stride=2)
@@ -330,8 +305,6 @@ class Common_2DCNN_Encoder(nn.Module):
         self.conv4 = Common_2d(256, 512, kernel_size=3, padding=1)
         self.pool3 = nn.AdaptiveAvgPool2d((1, 1))
 
-        self.fc = nn.Linear(512, out_embedding)
-
     def forward(self, x):
         x = self.conv1(x)
         x = self.pool1(x)
@@ -339,8 +312,7 @@ class Common_2DCNN_Encoder(nn.Module):
         x = self.conv3(x)
         x = self.conv4(x)
         x = self.pool3(x)
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
+        return x
 
 # =================================================================================================
 # 编码器组件
@@ -637,7 +609,7 @@ class Unet_3DCNN_Encoder(nn.Module):
 class HybridSN_encoder(nn.Module):
   """code from: https://github.com/gokriznastic/HybridSN
   自适应输入维度"""
-  def __init__(self, out_embedding=256, in_shape=None):
+  def __init__(self, in_shape=None):
     super(HybridSN_encoder, self).__init__()
     bands, h, w = in_shape
     self.conv1 = nn.Conv3d(1, 8, (7, 3, 3))
@@ -647,7 +619,7 @@ class HybridSN_encoder(nn.Module):
     self.conv3_2d = nn.Conv2d(bands * 32, 64, (3,3))
     h = h - 8
     # 全连接层（256个节点）
-    self.fc =  nn.Linear(h*h*64, out_embedding)
+    self.fc =  nn.Linear(h*h*64, 256)
     self.relu = nn.ReLU()
 
   def forward(self, x):
@@ -669,7 +641,7 @@ class HybridSN_encoder(nn.Module):
 class Vgg16_encoder(nn.Module):
     """code from: https://github.com/Lornatang/VGG-PyTorch
     为了适应小patch数据, 做了点pool的小修改"""
-    def __init__(self, out_embedding=None, in_shape=None):
+    def __init__(self, in_shape=None):
         super().__init__()
         bands, h, _ = in_shape
         if h < 16:
@@ -754,12 +726,9 @@ class Vgg16_encoder(nn.Module):
             self.layer4,
             self.layer5
         )
-        self.fc = nn.Linear(512,512)
 
     def forward(self,x):
         x=self.conv(x)
-        x = x.view(-1, 512)
-        x=self.fc(x)
         return x
 
 
@@ -832,7 +801,7 @@ class ResSPA(nn.Module):
         return F.leaky_relu(out + input)
 class SSRN_encoder(nn.Module):
     """code form: https://github.com/zilongzhong/SSRN"""
-    def __init__(self, out_embedding=128, in_shape=None):
+    def __init__(self, in_shape=None):
         super().__init__()
         bands, h, w = in_shape
         k = (bands - 6) // 2 # 自动计算k值
@@ -851,8 +820,6 @@ class SSRN_encoder(nn.Module):
         self.layer5 = ResSPA(28, 28)
         self.layer6 = ResSPA(28, 28)
 
-        self.fc = nn.Linear(28, out_embedding)
-
     def forward(self, x):
 
         x = F.leaky_relu(self.layer1(x)) #self.bn1(F.leaky_relu(self.layer1(x)))
@@ -865,7 +832,6 @@ class SSRN_encoder(nn.Module):
         x = self.layer6(x)
 
         x = F.avg_pool2d(x, x.size()[-1])
-        x = self.fc(x.squeeze())
         
         return x
 
@@ -887,7 +853,7 @@ class DepthwiseSeparableConv(nn.Module):
 class MobileNetV1_encoder(nn.Module):
     """code from: https://developer.aliyun.com/article/1309561
        论文地址: https://arxiv.org/abs/1704.04861"""
-    def __init__(self, out_embedding=128, in_shape=None):
+    def __init__(self, in_shape=None):
         super(MobileNetV1_encoder, self).__init__()
         bands, h, w = in_shape
 
@@ -909,7 +875,6 @@ class MobileNetV1_encoder(nn.Module):
         self.dw_separable_conv13 = DepthwiseSeparableConv(1024, 1024)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(1024, out_embedding)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -930,9 +895,6 @@ class MobileNetV1_encoder(nn.Module):
         x = self.dw_separable_conv13(x)
 
         x = self.avg_pool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-
         return x
 
 class Block(nn.Module):
@@ -964,7 +926,7 @@ class Block(nn.Module):
  
  
 class MobileNetV2_encoder(nn.Module):
-    def __init__(self, out_embedding=128, in_shape=None):
+    def __init__(self, in_shape=None):
         super(MobileNetV2_encoder, self).__init__()
  
         self.cfgs = [
@@ -983,7 +945,6 @@ class MobileNetV2_encoder(nn.Module):
         self.layers = self._make_layers(in_planes=32)
         self.conv2 = nn.Conv2d(320, 1280, kernel_size=1, bias=False)
         self.bn2 = nn.BatchNorm2d(1280)
-        self.linear = nn.Linear(1280, out_embedding)
         self.avg_pool = nn.AdaptiveAvgPool2d((1,1))
  
     def _make_layers(self, in_planes):
@@ -1000,9 +961,14 @@ class MobileNetV2_encoder(nn.Module):
         out = self.layers(out)
         out = F.relu(self.bn2(self.conv2(out)))
         out = self.avg_pool(out)
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
         return out
+
+class SpecTransformer_encoder(nn.Module):
+    def __init__(self, in_shape=None):
+        super(SpecTransformer_encoder, self).__init__()
+        self.net = SpecTransformer(img_size=in_shape)
+    def forward(self, x):
+        return self.net(x)
 
 if __name__ == '__main__':
     device = torch.device('cuda')

@@ -273,7 +273,8 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                 if (i+1) % interval_printinfo == 0:
                     Epoch_wirter.display(i+1)
 
-            DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE else False
+            DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE \
+                and model.encoder_q.if_draw_feature_maps else False
             if DRAW_FEATURE_MAPS:
                 frame.draw_feature_maps(model.encoder_q, samples_draw, epoch)
             
@@ -305,11 +306,8 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                     is_best = True
             save_model(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, 
                        epoch=epoch, avg_loss=loss_note.avg, avg_acc=top1_acc_note.avg, is_best=is_best)
-            if current_lr <= frame.min_lr:
-                pass
-            else:
-                if scheduler is not None:
-                    scheduler.step()
+            if scheduler is not None:
+                scheduler.step()
             loss_note.reset()
             top1_acc_note.reset()
             top5_acc_note.reset()

@@ -8,6 +8,8 @@ class Contrastive_Decoder(nn.Module):
         self.fc2 = nn.Linear(1024, mid_channels)
         self.fc3 = nn.Linear(mid_channels, out_channels, bias=False)
     def forward(self, x):
+        if x.dim() > 2:
+            x = x.squeeze()
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x)) # 输出语义
         return self.fc3(x)
