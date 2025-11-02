@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from contrastive_learning.Models.Encoder import Contrastive_Model
 import torch
-    
+
 class Ete_Model(nn.Module):
     def __init__(self,
                  encoder_model_name : str,
@@ -20,31 +20,34 @@ class Ete_Model(nn.Module):
             param_k.data.copy_(param_q.data)  # initialize
             param_k.requires_grad = False  # 确保k与q的初始参数一致，k模型不反向传播参数
 
-    @torch.no_grad()
-    def _update_key_encoder(self) -> None:
+    @torch.no_grad() # 调用函数时不计算梯度， 外部调用， 确保多卡正常训练
+    def update_key_encoder(self) -> None:
         """
-        Momentum update of the key encoder: k的参数动量更新
+        Momentum update of the key encoder: k的参数复制
         """
         for param_q, param_k in zip(
             self.encoder_q.parameters(), self.encoder_k.parameters()
         ):
             param_k.data = param_q.data # 更新k参数
 
-    def forward(self, input_q, input_k):
-        q = self.encoder_q(input_q)
+    def calculate_logits(self, q, k): # 计算logits和labels, 确保多卡训练， 外部调用
         q = nn.functional.normalize(q, dim=1)
         with torch.no_grad():
-            self._update_key_encoder()
-            k = self.encoder_k(input_k)
             k = nn.functional.normalize(k, dim=1)
         similarity_matrix = torch.matmul(q, k.T)
-        mask = torch.eye(input_q.shape[0], dtype=torch.bool).to(input_q.device)
-        positives = similarity_matrix[mask].view(input_q.shape[0], -1) # 对角线位置为正样本对
-        negatives = similarity_matrix[~mask].view(input_q.shape[0], -1)
+        mask = torch.eye(q.shape[0], dtype=torch.bool).to(q.device)
+        positives = similarity_matrix[mask].view(q.shape[0], -1) # 对角线位置为正样本对
+        negatives = similarity_matrix[~mask].view(q.shape[0], -1)
         logits = torch.cat([positives, negatives], dim=1)  # 拼接
         logits /= self.T
-        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(input_q.device)
+        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(q.device)
         return logits, labels
+
+    def forward(self, input_q, input_k):
+        q = self.encoder_q(input_q)
+        with torch.no_grad():
+            k = self.encoder_k(input_k)
+        return q, k
 
 class Moco_Model(nn.Module): # 单GPU训练的Moco框架
     def __init__(self, 
@@ -72,7 +75,7 @@ class Moco_Model(nn.Module): # 单GPU训练的Moco框架
 
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
     @torch.no_grad()
-    def _momentum_update_key_encoder(self) -> None:
+    def update_key_encoder(self) -> None:
         """
         Momentum update of the key encoder: k的参数动量更新
         """
@@ -94,23 +97,11 @@ class Moco_Model(nn.Module): # 单GPU训练的Moco框架
 
         self.queue_ptr[0] = ptr
 
-    def forward(self, input_q, input_k):
-        """
-        Input:
-            input_q: a batch of query images
-            input_k: a batch of key images
-        Output:
-            logits, targets
-        """
-        # compute query features
-        q = self.encoder_q(input_q)  # queries: NxC
-        q = nn.functional.normalize(q, dim=1) 
-        # compute key features
-        with torch.no_grad():  # no gradient to keys
-            self._momentum_update_key_encoder()  # update the key encoder
-            k = self.encoder_k(input_k)  # keys: NxC
+    def calculate_logits(self, q, k): # 计算logits和labels, 确保多卡训练， 外部调用
+        q = nn.functional.normalize(q, dim=1)
+        with torch.no_grad():
             k = nn.functional.normalize(k, dim=1)
-        # compute logits
+                # compute logits
         # Einstein sum is more intuitive
         # positive logits: Nx1
         l_pos = torch.einsum("nc,nc->n", [q, k]).unsqueeze(-1) # 计算批次中每每两个正样本对的相似度
@@ -124,9 +115,23 @@ class Moco_Model(nn.Module): # 单GPU训练的Moco框架
         logits /= self.T
 
         # labels: positive key indicators
-        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(input_q.device)
+        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(q.device)
 
         # dequeue and enqueue
         self._dequeue_and_enqueue(k)
-
         return logits, labels
+
+    def forward(self, input_q, input_k):
+        """
+        Input:
+            input_q: a batch of query images
+            input_k: a batch of key images
+        Output:
+            logits, targets
+        """
+        # compute query features
+        q = self.encoder_q(input_q)  # queries: NxC
+        # compute key features
+        with torch.no_grad():  # no gradient to keys
+            k = self.encoder_k(input_k)  # keys: NxC
+        return q, k

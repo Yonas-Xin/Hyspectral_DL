@@ -9,6 +9,7 @@ import torch
 import shutil
 from utils import AverageMeter, ProgressMeter, topk_accuracy
 import traceback
+from torch.nn import DataParallel
 
 try: # 使用swanlab进行试验管理
     import swanlab
@@ -21,13 +22,15 @@ except ImportError:
 
 class Cnn_Model_Frame:
     def __init__(self, model_name, min_lr=1e-7, epochs=300, device=None, if_full_cpu=True, 
-                 feature_map_layer_n=[], feature_map_num=12, feature_map_position=0, feature_map_interval=20):
+                 feature_map_layer_n=[], feature_map_num=12, feature_map_position=0, feature_map_interval=20,
+                 use_data_parallel=False):
         self.loss_func = nn.CrossEntropyLoss()
         self.min_lr = min_lr
         self.epochs = epochs
+        self.use_data_parallel = use_data_parallel # 是否使用DataParallel进行多GPU训练
 
         if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         else: self.device = device
 
         # 配置输出模型的名称和日志名称
@@ -71,7 +74,6 @@ class Cnn_Model_Frame:
         if self.if_full_cpu:
             torch.set_num_threads(cpu_num)
             print('Using cpu core num: ', cpu_num)
-        print(f'Cuda device count: {torch.cuda.device_count()} And the current device:{self.device}')  # 显卡数
 
     def check_input(self, model):
         """检查模型与所有参数的兼容性"""
@@ -91,6 +93,8 @@ class Cnn_Model_Frame:
 
     def gradcam_feature_maps(self, model, data_list, epoch):
         """绘制并保存特征图"""
+        if isinstance(model, DataParallel):
+            model = model.module  # 解包DataParallel
         train_mode = model.training  # 记录当前模式
         model.eval()  # 切换到评估模式
         data, label = data_list[0], data_list[1]
@@ -189,6 +193,8 @@ def load_parameter(frame, model, optimizer, scheduler=None, ck_pth=None): # 加�
         print(f"Loaded checkpoint from epoch {frame.start_epoch}, current lr {optimizer.param_groups[0]['lr']}")
 
 def save_model(frame, model, optimizer, scheduler, epoch=None, avg_loss=None, avg_acc=None, is_best = False):
+    if isinstance(model, DataParallel):
+        model = model.module  # 解包DataParallel
     state = {
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict(),
@@ -235,12 +241,20 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 "train_dataset_size": len(train_dataloader.dataset),
                 "eval_dataset_size": len(eval_dataloader.dataset) if eval_dataloader else 0,
                 "device": str(frame.device),
+                "use_data_parallel": frame.use_data_parallel,
                 "module": get_leaf_layers_info(model)
             }
         )
     log_writer = open(frame.log_path, 'w')
     model.to(frame.device)
     load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
+
+    if frame.use_data_parallel and torch.cuda.device_count() > 1:
+        print(f"Use DataParallel, The number of GPUs is: {torch.cuda.device_count()}")
+        model = DataParallel(model, device_ids=range(torch.cuda.device_count()))
+    else:
+        print(f'Cuda device count: {torch.cuda.device_count()} And the current device:{frame.device}')  # 显卡数
+    model.to(frame.device)
 
     best_train_accuracy = 0
     best_test_accuracy = 0
@@ -285,8 +299,8 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                             max_batch_features = min(data.size(0), frame.feature_map_num)
                             swanlab.log({f"original_input": [swanlab.Image(data[i][:3], caption=f"{int(label[i])}") \
                                                              for i in range(max_batch_features)]}, step=epoch) # 绘制原始输入图像
-                            BATCH_IMGS.append(data.detach().cpu()) # 存储输入图像
-                            BATCH_IMGS.append(label.detach().cpu())
+                            BATCH_IMGS.append(data[:max_batch_features].detach().cpu()) # 存储输入图像
+                            BATCH_IMGS.append(label[:max_batch_features].detach().cpu())
                         output = model(data)
                         _, preds = torch.max(output, 1)
                         all_labels[idx:idx+batchs] = label.cpu().numpy()
@@ -296,9 +310,11 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                         test_loss_note.update(loss.item(), batchs)
                         test_acc_note.update(acc[0].item(), batchs)
                         idx += batchs
-
+            
+            if_draw_feature_maps = model.module.if_draw_feature_map() if isinstance(model, DataParallel) \
+                else model.if_draw_feature_map()
             DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and \
-                SWANLAB_AVAILABLE and model.if_draw_feature_map() else False # 每20个epoch绘制一次特征图
+                SWANLAB_AVAILABLE and if_draw_feature_maps else False # 每20个epoch绘制一次特征图
             if DRAW_FEATURE_MAPS and BATCH_IMGS:
                 frame.gradcam_feature_maps(model, BATCH_IMGS, epoch)
             test_accuracy = test_acc_note.avg

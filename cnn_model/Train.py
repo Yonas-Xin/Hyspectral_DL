@@ -46,6 +46,8 @@ min_lr = 3e-5  # 最低学习率
 warm_up_epochs = 20  # 预热epoch数
 pretrain_pth = None
 ck_pth = None # 用于断点学习
+if_full_cpu = True  # 是否全负荷cpu
+USE_DATA_PARALLEL = False # 是否使用DataParallel进行多显卡训练
 
 """特征图绘制相关参数"""
 FEATURE_MAP_LAYER_NAMES = [] # 指定需要绘制特征图的层名，使用列表形式，例如 ['encoder','layer1.0.conv1']，如果为空
@@ -53,20 +55,23 @@ FEATURE_MAP_NUM = 36 # 每个层绘制的特征图数量
 FEATURE_MAP_POSITION = 0.2 # 在测试集中的位置，范围0-1之间，例如0.5表示在测试集的中间位置绘制特征图(不能精确控制具体位置，只能大致控制)
 FEATURE_MAP_INTERVAL = 10 # 每隔多少个epoch绘制一次特征图
 if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # 显卡设置
-    if_full_cpu = True  # 是否全负荷cpu
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  # 显卡设置
+    gpu_count = torch.cuda.device_count()
+    if gpu_count < 2:
+        USE_DATA_PARALLEL = False
 
     dataloader_num_workers = cpu_count() // 4 # 根据cpu核心数自动决定num_workers数量
-    print(f'Using num_workers: {dataloader_num_workers}')
+    print(f"🔍 PyTorch Version: {torch.__version__}")
+    print(f'📊 Using num_workers: {dataloader_num_workers}')
     # 配置训练数据集和模型
-    train_image_lists = read_dataset_from_txt(train_images_dir) # 使用rewrite好点
+    train_image_lists = read_dataset_from_txt(train_images_dir)
     test_image_lists = read_dataset_from_txt(test_images_dir)
     list_shuffler = random.Random(42)
-    list_shuffler.shuffle(test_image_lists) # 打乱测试集顺序
+    list_shuffler.shuffle(test_image_lists)
     train_dataset = CNN_Dataset(train_image_lists)
     eval_dataset = CNN_Dataset(test_image_lists)
     model = MODEL_DICT[model_selected](out_classes=out_classes, in_shape=train_dataset.data_shape)  # 模型实例化
-    print(f"Image shape: {train_dataset.data_shape}")
+    print(f"🎯 Image shape: {train_dataset.data_shape}")
     if pretrain_pth is not None:
         state_dict = torch.load(pretrain_pth, map_location=device)["backbone"]
         model._load_encoer_params(state_dict) # 加载预训练权重
@@ -74,9 +79,11 @@ if __name__ == '__main__':
     optimizer = optim.AdamW(model.parameters(), lr=init_lr, weight_decay=1e-4)  # 优化器
     scheduler = WarmupLinearSchedule(optimizer, warmup_steps=warm_up_epochs, t_total=epochs+warm_up_epochs, min_lr=min_lr)  # 学习率调度器
     train_dataloader = DataLoader(train_dataset, batch_size=batch, shuffle=True, pin_memory=True, 
-                                  num_workers=dataloader_num_workers, prefetch_factor=2,persistent_workers=True)  # 数据迭代器
+                                  num_workers=dataloader_num_workers, prefetch_factor=2,
+                                  persistent_workers=dataloader_num_workers > 0)  # 数据迭代器
     eval_dataloader = DataLoader(eval_dataset, batch_size=batch, shuffle=False, pin_memory=True, 
-                                 num_workers=dataloader_num_workers, prefetch_factor=2,persistent_workers=True)  # 数据迭代器
+                                 num_workers=dataloader_num_workers, prefetch_factor=2,
+                                 persistent_workers=dataloader_num_workers > 0)  # 数据迭代器
 
     frame = Cnn_Model_Frame(model_name=f'{model_selected}_{config_name}', 
                             epochs=epochs+warm_up_epochs, 
@@ -86,7 +93,8 @@ if __name__ == '__main__':
                             feature_map_layer_n=FEATURE_MAP_LAYER_NAMES,
                             feature_map_num=FEATURE_MAP_NUM,
                             feature_map_position=FEATURE_MAP_POSITION,
-                            feature_map_interval=FEATURE_MAP_INTERVAL)
+                            feature_map_interval=FEATURE_MAP_INTERVAL,
+                            use_data_parallel=USE_DATA_PARALLEL)
     
     train(frame=frame,
           model=model, 

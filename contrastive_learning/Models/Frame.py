@@ -10,6 +10,7 @@ import torch
 import traceback
 from utils import AverageMeter, ProgressMeter, topk_accuracy
 import numpy as np
+from torch.nn import DataParallel
 
 try: # 使用swanlab进行实验管理
     import swanlab
@@ -22,14 +23,16 @@ except ImportError:
 
 class Contrastive_Frame:
     def __init__(self, augment, model_name, min_lr=1e-7, epochs=300, device=None, if_full_cpu=True
-                 ,feature_map_layer_n=None, feature_map_num=12, feature_map_interval=10):
+                 ,feature_map_layer_n=None, feature_map_num=12, feature_map_interval=10,
+                 use_data_parallel=False):
         self.augment = augment
         self.loss = nn.CrossEntropyLoss()
         self.min_lr = min_lr
         self.epochs=epochs
+        self.use_data_parallel = use_data_parallel # 是否使用DataParallel进行多GPU训练
 
         if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         else: self.device = device
 
         # 配置输出模型的名称和日志名称
@@ -67,7 +70,6 @@ class Contrastive_Frame:
         if self.if_full_cpu:
             torch.set_num_threads(cpu_num)
             print('Using cpu core num: ', cpu_num)
-        print(f'Cuda device count: {torch.cuda.device_count()} And the current device:{self.device}')  # 显卡数
 
     def check_input(self, model):
         """检查模型与所有参数的兼容性"""
@@ -137,6 +139,8 @@ def stretch_img(arr):
 
 def save_model(frame, model, optimizer, scheduler, epoch=None, avg_loss=None, avg_acc=None, is_best=False):
     """注意：将需要迁移的部分使用 backbone 存储起来"""
+    if isinstance(model, DataParallel):
+        model = model.module  # 解包DataParallel
     state = {
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict(),
@@ -223,12 +227,19 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                 "batch_size": dataloader.batch_size,
                 "single-epoch_dataset_size": len(dataloader.dataset),
                 "device": str(frame.device),
+                "use_data_parallel": frame.use_data_parallel,
                 "module": get_leaf_layers_info(model)
             }
         )
     log_writer = open(frame.log_path, 'w')
     model.to(frame.device)
     load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
+    if frame.use_data_parallel:
+        print(f"Use DataParallel, The number of GPUs is: {torch.cuda.device_count()}")
+        model = DataParallel(model, device_ids=range(torch.cuda.device_count()))
+    else:
+        print(f'Cuda device count: {torch.cuda.device_count()} And the current device:{frame.device}')  # 显卡数
+    model.to(frame.device)
     
     model_save_epoch = 0
     max_iter_num = len(dataloader)
@@ -238,6 +249,7 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
     top5_acc_note = AverageMeter("Top5-Accuracy", ":.4f") 
     Epoch_wirter = ProgressMeter(frame.epochs, len(dataloader), [loss_note, top1_acc_note, top5_acc_note], "\nStep")
 
+    actual_model = model.module if isinstance(model, DataParallel) else model # 创建实际模型的引用
     samples_draw = []
     # start training
     try:
@@ -252,8 +264,8 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                     q = frame.augment(block)
                     k = frame.augment(block)
                 if not samples_draw and SWANLAB_AVAILABLE: # 仅在第一个epoch保存样本用于绘图
-                    samples_draw.append(block.detach().cpu())
                     max_draw_samples = min(batchs, frame.feature_map_num)
+                    samples_draw.append(block[:max_draw_samples].detach().cpu())
                     swanlab.log(
                     {
                         "samples/original": [swanlab.Image(img[:3]) for img in samples_draw[0][:max_draw_samples]],
@@ -261,7 +273,9 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                         "samples/augmented_k": [swanlab.Image(img[:3]) for img in k.detach()[:max_draw_samples]],
                     })
                 optimizer.zero_grad()  # 清空梯度
-                logits, label = model(q, k)
+                actual_model.update_key_encoder() # 更新key encoder
+                q, k = model(q, k) # 前向计算
+                logits, label = actual_model.calculate_logits(q, k) # 计算logits和labels
                 loss = frame.loss(logits, label)
                 acc1, acc5 = topk_accuracy(logits, label, topk=(1, 5))
 
@@ -274,9 +288,9 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                     Epoch_wirter.display(i+1)
 
             DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE \
-                and model.encoder_q.if_draw_feature_maps else False
+                and actual_model.encoder_q.if_draw_feature_maps else False
             if DRAW_FEATURE_MAPS:
-                frame.draw_feature_maps(model.encoder_q, samples_draw, epoch)
+                frame.draw_feature_maps(actual_model.encoder_q, samples_draw, epoch)
             
             dataloader.dataset.reset()
             current_lr = optimizer.param_groups[0]['lr']
