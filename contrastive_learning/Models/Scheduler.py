@@ -40,7 +40,7 @@ class WarmupLinearSchedule(LambdaLR):
 
     def lr_lambda(self, step):
         if step < self.warmup_steps:
-            return float(step) / float(max(1, self.warmup_steps))
+            return float(step)+1 / float(max(1, self.warmup_steps))
         return max(self.param, float(self.t_total - step) / float(max(1.0, self.t_total - self.warmup_steps)))
 
 

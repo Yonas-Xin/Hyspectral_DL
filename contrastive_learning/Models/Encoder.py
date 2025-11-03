@@ -89,7 +89,7 @@ class Contrastive_Model(nn.Module):
         self.decoder = Contrastive_Decoder(IN_CHANNELS[encoder_model_name], 1024, mid_channels=1024)
         self.dim = DIM_DICT[encoder_model_name]
         self.embedding_dim = IN_CHANNELS[encoder_model_name]
-        self.if_draw_feature_maps = FEATURE_MAPS[encoder_model_name] if hasattr(FEATURE_MAPS, encoder_model_name) else False
+        self.if_draw_feature_maps = FEATURE_MAPS[encoder_model_name] if encoder_model_name in FEATURE_MAPS.keys() else False
     def forward(self, x):
         # 输入数据有以下两种形式: [B, bands], [B, C, H, W], [B, 1, C, H, W]
         if x.dim() == 2:

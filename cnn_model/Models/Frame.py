@@ -229,6 +229,9 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
     
     frame.check_input(model) # 检查模型与参数的兼容性
     IF_DRAW_FEATURE_MAPS = model.if_draw_feature_maps()
+    log_writer = open(frame.log_path, 'w')
+    model.to(frame.device)
+    load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
     if SWANLAB_AVAILABLE:
         swanlab.init(
             project="Cnn_Model_Training",
@@ -246,10 +249,6 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 "module": get_leaf_layers_info(model)
             }
         )
-    log_writer = open(frame.log_path, 'w')
-    model.to(frame.device)
-    load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
-
     if frame.use_data_parallel and torch.cuda.device_count() > 1:
         print(f"Use DataParallel, The number of GPUs is: {torch.cuda.device_count()}")
         model = DataParallel(model, device_ids=range(torch.cuda.device_count()))

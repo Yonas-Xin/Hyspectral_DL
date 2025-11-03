@@ -22,10 +22,11 @@ DATASET_DICT = {
 # 'SRACN' 'Common_1DCNN' 'Common_2DCNN' 'Common_3DCNN' "Res_3D_18Net" "Res_3D_34Net" "Res_3D_50Net" 'SSRN' 
 # 'HybridSN' 'Vgg16' 'MobileNetV1' 'MobileNetV2' 'ResNet18' 'ResNet34' 'ResNet50' 'spec_transformer'
 
-encoder_model_name = 'spec_transformer'
-config_model_name = "Test"  # 模型名称
+encoder_model_name = 'spec_transformer' # 选择模型名称
+config_model_name = "Test" # 配置后缀名
 TRAIN_MODE = "ETE" # ETE or MOCO 训练方式选择
 DATA_MANAGE_MODE = 2 # 数据管理方式，1为根据裁剪的样本进行训练，2为根据选择的影像自动训练
+patch_size = 17 # DATA_MANAGE_MODE=2 时需指定该参数
 images_dir = r'c:\Users\85002\Desktop\111' # 数据集
 
 
@@ -36,12 +37,12 @@ init_lr = 1e-4  # lr
 min_lr = 1e-6 # 最低学习率
 warm_up_epochs = 10  # 预热epoch数
 ck_pth = None
+DISPLAY_NUMS = 1  # 每个epoch打印多少次训练信息，小于2不打印
 
 K = 65536
 m = 0.999
 T = 0.07
-patch_size = 17 # DATA_MANAGE_MODE = 2时需指定该
-MUITITHREADING_MODE = True
+MUITITHREADING_MODE = True # 是否使用多线程加速数据加载
 USE_DATA_PARALLEL = True # 是否使用DataParallel进行多显卡训练
 
 """特征图绘制相关参数"""
@@ -64,8 +65,8 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), lr=init_lr)  # 优化器
     scheduler = WarmupLinearSchedule(optimizer, warmup_steps=warm_up_epochs, t_total=epochs+warm_up_epochs, min_lr=min_lr)
 
-    augment = HighDimBatchAugment(spectral_mask_prob=0, spectral_mask_p=0.25, band_dropout_prob=0.5, bands_dropout_p=0.25)
-    dataloader = DataLoader(dataset, batch_size=batch, shuffle=True, pin_memory=True, num_workers=dataloader_num_workers,
+    augment = HighDimBatchAugment(spectral_mask_prob=0.5, spectral_mask_p=0.25, band_dropout_prob=0.5, bands_dropout_p=0.25)
+    dataloader = DataLoader(dataset, batch_size=batch, shuffle=True, pin_memory=True, num_workers=dataloader_num_workers, prefetch_factor=2,
                             persistent_workers=MUITITHREADING_MODE and dataloader_num_workers > 0, drop_last=True)  # 数据迭代器
 
     frame = Contrastive_Frame(augment=augment, 
@@ -77,12 +78,12 @@ if __name__ == '__main__':
                            feature_map_layer_n=FEATURE_MAP_LAYER_NAMES,
                            feature_map_num=FEATURE_MAP_NUM,
                            feature_map_interval=FEATURE_MAP_INTERVAL,
-                           use_data_parallel=USE_DATA_PARALLEL)
+                           use_data_parallel=USE_DATA_PARALLEL,
+                           display_nums=DISPLAY_NUMS)
     
     train(frame=frame,
           model=model,
           optimizer=optimizer,
           scheduler=scheduler,
           dataloader=dataloader,
-          ck_pth=ck_pth, 
-        )
+          ck_pth=ck_pth, )

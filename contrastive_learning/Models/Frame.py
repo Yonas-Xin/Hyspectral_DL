@@ -24,12 +24,13 @@ except ImportError:
 class Contrastive_Frame:
     def __init__(self, augment, model_name, min_lr=1e-7, epochs=300, device=None, if_full_cpu=True
                  ,feature_map_layer_n=None, feature_map_num=12, feature_map_interval=10,
-                 use_data_parallel=False):
+                 use_data_parallel=False, display_nums=10):
         self.augment = augment
         self.loss = nn.CrossEntropyLoss()
         self.min_lr = min_lr
         self.epochs=epochs
         self.use_data_parallel = use_data_parallel # 是否使用DataParallel进行多GPU训练
+        self.display_nums = display_nums
 
         if device is None:
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -217,9 +218,11 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
             if log_writer is not None: # 确保日志文件被正确关闭
                 log_writer.close()
         except:pass
-    
     frame.check_input(model)
-    IF_DRAW_FEATURE_MAPS = model.encoder_q.if_draw_feature_maps if hasattr(model.encoder_q, 'if_draw_feature_maps') else False
+    IF_DRAW_FEATURE_MAPS = model.encoder_q.if_draw_feature_maps
+    log_writer = open(frame.log_path, 'w')
+    model.to(frame.device)
+    load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
     if SWANLAB_AVAILABLE:
         swanlab.init(
             project="Contrastive_Learning",
@@ -236,9 +239,6 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                 "module": get_leaf_layers_info(model)
             }
         )
-    log_writer = open(frame.log_path, 'w')
-    model.to(frame.device)
-    load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
     if frame.use_data_parallel:
         print(f"Use DataParallel, The number of GPUs is: {torch.cuda.device_count()}")
         model = DataParallel(model, device_ids=range(torch.cuda.device_count()))
@@ -248,13 +248,14 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
     
     model_save_epoch = 0
     max_iter_num = len(dataloader)
-    interval_printinfo = max_iter_num // 10 # 每个epoch打印十次过程参数
+    display_nums = frame.display_nums if frame.display_nums > 1 else 0.1
+    interval_printinfo = int(max_iter_num // display_nums)
     loss_note = AverageMeter("Loss", ":.6f")
     top1_acc_note = AverageMeter("Top1-Accuracy", ":.4f")
     top5_acc_note = AverageMeter("Top5-Accuracy", ":.4f") 
     Epoch_wirter = ProgressMeter(frame.epochs, len(dataloader), [loss_note, top1_acc_note, top5_acc_note], "\nStep")
 
-    samples_draw = []
+    DAMPLES = []
     # start training
     try:
         for epoch in range(frame.start_epoch+1, frame.epochs+1):
@@ -267,12 +268,12 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                 with torch.no_grad():
                     q = frame.augment(block)
                     k = frame.augment(block)
-                if not samples_draw and SWANLAB_AVAILABLE: # 仅在第一个epoch保存样本用于绘图
+                if not DAMPLES and SWANLAB_AVAILABLE: # 仅在第一个epoch保存样本用于绘图
                     max_draw_samples = min(batchs, frame.feature_map_num)
-                    samples_draw.append(block[:max_draw_samples].detach().cpu())
+                    DAMPLES.append(block[:max_draw_samples].detach().cpu())
                     swanlab.log(
                     {
-                        "samples/original": [swanlab.Image(img[:3]) for img in samples_draw[0][:max_draw_samples]],
+                        "samples/original": [swanlab.Image(img[:3]) for img in DAMPLES[0][:max_draw_samples]],
                         "samples/augmented_q": [swanlab.Image(img[:3]) for img in q.detach()[:max_draw_samples]],
                         "samples/augmented_k": [swanlab.Image(img[:3]) for img in k.detach()[:max_draw_samples]],
                     })
@@ -299,7 +300,7 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
             DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE \
                 and IF_DRAW_FEATURE_MAPS else False
             if DRAW_FEATURE_MAPS:
-                frame.draw_feature_maps(model, samples_draw, epoch)
+                frame.draw_feature_maps(model, DAMPLES, epoch)
             
             dataloader.dataset.reset()
             current_lr = optimizer.param_groups[0]['lr']

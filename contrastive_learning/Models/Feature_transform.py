@@ -84,8 +84,8 @@ class BandDropout(nn.Module):
         batch_size, C = x.shape[0], x.shape[1]
         drop_mask = (torch.rand(batch_size, 1, 1, 1, device=x.device) < self.drop_prob)
         band_mask = (torch.rand(batch_size, C, 1, 1, device=x.device) > self.p).float()
-        x = x * (drop_mask * band_mask + ~drop_mask)
-        return x
+        mask = (drop_mask * band_mask + ~drop_mask)
+        return x * mask
 
 class HighDimBatchAugment(nn.Module):
     """高维图像块（如高光谱[B,C,H,W]）的批量增强"""
