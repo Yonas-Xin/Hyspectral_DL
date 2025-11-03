@@ -89,6 +89,10 @@ class Contrastive_Frame:
     def draw_feature_maps(self, model, data_list, epoch):
         """绘制并保存特征图, model必须是encoder_q"""
         train_mode = model.training
+        if isinstance(model, DataParallel):
+            model = model.module.encoder_q
+        else:
+            model = model.encoder_q
         model.eval()
         data = data_list[0]
         max_batch_features = min(data.size(0), self.feature_map_num)
@@ -215,6 +219,7 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
         except:pass
     
     frame.check_input(model)
+    IF_DRAW_FEATURE_MAPS = model.encoder_q.if_draw_feature_maps if hasattr(model.encoder_q, 'if_draw_feature_maps') else False
     if SWANLAB_AVAILABLE:
         swanlab.init(
             project="Contrastive_Learning",
@@ -249,7 +254,6 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
     top5_acc_note = AverageMeter("Top5-Accuracy", ":.4f") 
     Epoch_wirter = ProgressMeter(frame.epochs, len(dataloader), [loss_note, top1_acc_note, top5_acc_note], "\nStep")
 
-    actual_model = model.module if isinstance(model, DataParallel) else model # 创建实际模型的引用
     samples_draw = []
     # start training
     try:
@@ -273,9 +277,14 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                         "samples/augmented_k": [swanlab.Image(img[:3]) for img in k.detach()[:max_draw_samples]],
                     })
                 optimizer.zero_grad()  # 清空梯度
-                actual_model.update_key_encoder() # 更新key encoder
-                q, k = model(q, k) # 前向计算
-                logits, label = actual_model.calculate_logits(q, k) # 计算logits和labels
+                if isinstance(model, DataParallel):
+                    model.module.update_key_encoder() # 更新key encoder
+                    q, k = model(q, k) # 前向计算
+                    logits, label = model.module.calculate_logits(q, k) # 计算logits和labels
+                else:
+                    model.update_key_encoder() # 更新key encoder
+                    q, k = model(q, k) # 前向计算
+                    logits, label = model.calculate_logits(q, k) # 计算logits和labels
                 loss = frame.loss(logits, label)
                 acc1, acc5 = topk_accuracy(logits, label, topk=(1, 5))
 
@@ -288,9 +297,9 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
                     Epoch_wirter.display(i+1)
 
             DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE \
-                and actual_model.encoder_q.if_draw_feature_maps else False
+                and IF_DRAW_FEATURE_MAPS else False
             if DRAW_FEATURE_MAPS:
-                frame.draw_feature_maps(actual_model.encoder_q, samples_draw, epoch)
+                frame.draw_feature_maps(model, samples_draw, epoch)
             
             dataloader.dataset.reset()
             current_lr = optimizer.param_groups[0]['lr']

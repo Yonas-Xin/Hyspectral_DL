@@ -60,15 +60,15 @@ class RandomSpectralMask(nn.Module):
             
         # 为每个空间位置(H,W)生成独立的随机掩膜
         B, C, H, W = x.shape
-        mask = torch.rand(B, C, H, W, device=x.device) < self.p
+        mask = torch.rand(B, C, H, W, device=x.device) > self.p
         batch_mask = torch.rand(B, 1, 1, 1, device=x.device) < self.mask_prob
         batch_mask = batch_mask.expand(B, C, H, W)
-        mask = (mask | batch_mask).float()
+        mask = (mask | ~batch_mask).float()
         return x * mask
 
 class BandDropout(nn.Module):
     """随机对某个光谱波段全丢弃"""
-    def __init__(self, p=0.2, drop_prob=0.5):
+    def __init__(self, drop_prob=0.5, p=0.2):
         super().__init__()
         # self.dropout = nn.Dropout3d(p)  # 3D Dropout
         self.drop_prob = drop_prob
@@ -81,10 +81,10 @@ class BandDropout(nn.Module):
         """
         if not self.training:
             return x
-        batch_size = x.shape[0]
-        drop_mask = torch.rand(batch_size, 1, 1, 1, device=x.device) < self.drop_prob
-        band_mask = (torch.rand(x.shape[1], 1, 1, device=x.device) > self.p).float()
-        x = x * (drop_mask * band_mask + (~drop_mask))
+        batch_size, C = x.shape[0], x.shape[1]
+        drop_mask = (torch.rand(batch_size, 1, 1, 1, device=x.device) < self.drop_prob)
+        band_mask = (torch.rand(batch_size, C, 1, 1, device=x.device) > self.p).float()
+        x = x * (drop_mask * band_mask + ~drop_mask)
         return x
 
 class HighDimBatchAugment(nn.Module):
@@ -104,8 +104,8 @@ class HighDimBatchAugment(nn.Module):
             noise_std: float = 0.01,
             erase_scale: Tuple[float, float] = (0.01, 0.3),
             erase_ratio: Tuple[float, float] = (0.4, 2.5),
-            spectral_mask_p: float = 0.75,
-            bands_dropout_p: float = 0.2,
+            spectral_mask_p: float = 0.25,
+            bands_dropout_p: float = 0.25,
     ):
         super().__init__()
         # 初始化增强操作
@@ -128,7 +128,7 @@ class HighDimBatchAugment(nn.Module):
             self.spectral_mask = RandomSpectralMask(mask_prob=spectral_mask_prob, p=spectral_mask_p)
         else: self.spectral_mask = None
         if band_dropout_prob > 0:
-            self.band_dropout = BandDropout(p = bands_dropout_p, drop_prob=band_dropout_prob)
+            self.band_dropout = BandDropout(drop_prob=band_dropout_prob, p = bands_dropout_p)
         else: self.band_dropout = None
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

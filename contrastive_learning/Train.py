@@ -24,14 +24,14 @@ DATASET_DICT = {
 
 encoder_model_name = 'spec_transformer'
 config_model_name = "Test"  # 模型名称
-TRAIN_MODE = "MOCO" # ETE or MOCO 训练方式选择
+TRAIN_MODE = "ETE" # ETE or MOCO 训练方式选择
 DATA_MANAGE_MODE = 2 # 数据管理方式，1为根据裁剪的样本进行训练，2为根据选择的影像自动训练
 images_dir = r'c:\Users\85002\Desktop\111' # 数据集
 
 
 if_full_cpu = True # 是否全负荷cpu
 epochs = 100  # epoch, 实际训练轮数为 epochs + warm_up_epochs
-batch = 64  # batch
+batch = 1024  # batch
 init_lr = 1e-4  # lr
 min_lr = 1e-6 # 最低学习率
 warm_up_epochs = 10  # 预热epoch数
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), lr=init_lr)  # 优化器
     scheduler = WarmupLinearSchedule(optimizer, warmup_steps=warm_up_epochs, t_total=epochs+warm_up_epochs, min_lr=min_lr)
 
-    augment = HighDimBatchAugment(spectral_mask_prob=0.5, band_dropout_prob=0)
+    augment = HighDimBatchAugment(spectral_mask_prob=0, spectral_mask_p=0.25, band_dropout_prob=0.5, bands_dropout_p=0.25)
     dataloader = DataLoader(dataset, batch_size=batch, shuffle=True, pin_memory=True, num_workers=dataloader_num_workers,
                             persistent_workers=MUITITHREADING_MODE and dataloader_num_workers > 0, drop_last=True)  # 数据迭代器
 
@@ -76,7 +76,8 @@ if __name__ == '__main__':
                            if_full_cpu=if_full_cpu,
                            feature_map_layer_n=FEATURE_MAP_LAYER_NAMES,
                            feature_map_num=FEATURE_MAP_NUM,
-                           feature_map_interval=FEATURE_MAP_INTERVAL)
+                           feature_map_interval=FEATURE_MAP_INTERVAL,
+                           use_data_parallel=USE_DATA_PARALLEL)
     
     train(frame=frame,
           model=model,

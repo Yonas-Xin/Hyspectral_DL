@@ -228,6 +228,7 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
             log_writer.close()
     
     frame.check_input(model) # 检查模型与参数的兼容性
+    IF_DRAW_FEATURE_MAPS = model.if_draw_feature_maps()
     if SWANLAB_AVAILABLE:
         swanlab.init(
             project="Cnn_Model_Training",
@@ -311,10 +312,9 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                         test_acc_note.update(acc[0].item(), batchs)
                         idx += batchs
             
-            if_draw_feature_maps = model.module.if_draw_feature_map() if isinstance(model, DataParallel) \
-                else model.if_draw_feature_map()
+
             DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and \
-                SWANLAB_AVAILABLE and if_draw_feature_maps else False # 每20个epoch绘制一次特征图
+                SWANLAB_AVAILABLE and IF_DRAW_FEATURE_MAPS else False # 每20个epoch绘制一次特征图
             if DRAW_FEATURE_MAPS and BATCH_IMGS:
                 frame.gradcam_feature_maps(model, BATCH_IMGS, epoch)
             test_accuracy = test_acc_note.avg
