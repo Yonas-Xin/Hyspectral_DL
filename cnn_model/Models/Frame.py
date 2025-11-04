@@ -10,6 +10,7 @@ import shutil
 from utils import AverageMeter, ProgressMeter, topk_accuracy
 import traceback
 from torch.nn import DataParallel
+import re
 
 try: # 使用swanlab进行试验管理
     import swanlab
@@ -28,26 +29,11 @@ class Cnn_Model_Frame:
         self.min_lr = min_lr
         self.epochs = epochs
         self.use_data_parallel = use_data_parallel # 是否使用DataParallel进行多GPU训练
+        self.model_name = model_name
 
         if device is None:
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         else: self.device = device
-
-        # 配置输出模型的名称和日志名称
-        current_time = datetime.now().strftime("%Y%m%d%H%M")  # 记录系统时间
-        model_save_name = f'{model_name}_{current_time}'
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.parent_dir = os.path.join(base_dir, '_results')  # 创建一个父目录保存训练结果
-        if not os.path.exists(self.parent_dir):
-            os.makedirs(self.parent_dir)
-        self.model_dir = os.path.join(self.parent_dir, model_save_name)
-        if not os.path.exists(self.model_dir):
-            os.makedirs(self.model_dir)
-            
-        self.model_path = os.path.join(self.model_dir, f'{model_save_name}.pth')
-        self.model_best_path = os.path.join(self.model_dir, f'{model_save_name}_best.pth')
-        self.model_best_path_pt = os.path.join(self.model_dir, f'{model_save_name}_best.pt')
-        self.log_path = os.path.join(self.model_dir, f'{model_save_name}.log')
 
         # 配置训练信息、用于断点训练
         self.if_full_cpu = if_full_cpu
@@ -63,6 +49,35 @@ class Cnn_Model_Frame:
         self.feature_map_num = feature_map_num
         self.feature_map_position = feature_map_position  # 控制绘制特征图的位置
         self.feature_map_interval = feature_map_interval  # 每隔多少个epoch绘制一次特征图
+
+    def init_files(self, id=None): # 初始化文件夹和日志文件, id用于swanlab断点续训
+        current_time = datetime.now().strftime("%Y%m%d%H%M")  # 记录系统时间
+        if id is not None:
+            model_save_name = f'{self.model_name}_{current_time}_ID{id}'
+        else:
+            model_save_name = f'{self.model_name}_{current_time}'
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.parent_dir = os.path.join(base_dir, '_results')  # 创建一个父目录保存训练结果
+        if not os.path.exists(self.parent_dir):
+            os.makedirs(self.parent_dir)
+        self.model_dir = os.path.join(self.parent_dir, model_save_name)
+        if not os.path.exists(self.model_dir):
+            os.makedirs(self.model_dir)
+        # 配置输出模型的名称和日志名称
+        self.model_path = os.path.join(self.model_dir, f'{model_save_name}.pth')
+        self.model_best_path = os.path.join(self.model_dir, f'{model_save_name}_best.pth')
+        self.model_best_path_pt = os.path.join(self.model_dir, f'{model_save_name}_best.pt')
+        self.log_path = os.path.join(self.model_dir, f'{model_save_name}.log')
+
+    def find_id(self, ck_pth): # 从ckpt路径中提取ID
+        if ck_pth is None:
+            return None
+        ck_pth = os.path.basename(ck_pth)
+        pattern = r"_ID([^\.]+)\."
+        match = re.search(pattern, ck_pth)
+        if match:
+            return match.group(1)[:21]
+        return None
 
     def full_cpu(self):
         cpu_num = cpu_count()  # 自动获取最大核心数目
@@ -182,7 +197,7 @@ def load_parameter(frame, model, optimizer, scheduler=None, ck_pth=None): # 加�
         try:
             optimizer.load_state_dict(checkpoint['optimizer']) # 恢复优化器
             print('The optimizer state have been loaded!')
-            frame.start_epoch = checkpoint.get('epoch', -1) + 1  # 获取epoch信息，如果没有，默认为0
+            frame.start_epoch = checkpoint.get('epoch', -1)
         except(ValueError, RuntimeError):
             print('The optimizer is incompatible, and the parameters do not match')
         if scheduler and 'scheduler' in checkpoint: # 恢复调度器
@@ -226,14 +241,13 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
         print_report(frame.best_all_labels.tolist(), frame.best_all_preds.tolist(), log_writer=log_writer)
         if log_writer is not None: # 确保日志文件被正确关闭
             log_writer.close()
-    
+    ID = frame.find_id(ck_pth) # 从ckpt路径中提取swanlab的ID
     frame.check_input(model) # 检查模型与参数的兼容性
-    IF_DRAW_FEATURE_MAPS = model.if_draw_feature_maps()
-    log_writer = open(frame.log_path, 'w')
+    IF_DRAW_FEATURE_MAPS = model.if_draw_feature_map()
     model.to(frame.device)
     load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
     if SWANLAB_AVAILABLE:
-        swanlab.init(
+        run = swanlab.init(
             project="Cnn_Model_Training",
             experiment_name=f"{type(model).__name__}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             config={
@@ -247,8 +261,14 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
                 "device": str(frame.device),
                 "use_data_parallel": frame.use_data_parallel,
                 "module": get_leaf_layers_info(model)
-            }
+            },
+            resume=True if ck_pth is not None else False, # 控制断点续训
+            id=ID,
         )
+        frame.init_files(id=run.id)  # 初始化文件夹和日志文件
+    else:
+        frame.init_files(id=None)
+    log_writer = open(frame.log_path, 'w')
     if frame.use_data_parallel and torch.cuda.device_count() > 1:
         print(f"Use DataParallel, The number of GPUs is: {torch.cuda.device_count()}")
         model = DataParallel(model, device_ids=range(torch.cuda.device_count()))
