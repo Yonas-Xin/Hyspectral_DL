@@ -4,7 +4,8 @@ numpy==2.2.6
 tqdm==4.67.1
 spectral==0.24
 scikit-learn==1.7.2
-gdal==3.11.0
+# gdal==3.11.0
 kornia==0.8.0
 grad_cam==1.5.5
-# conda install -c conda-forge gdal==3.11.0
+swanlab>=0.6.12
+# conda install -c conda-forge gdal==3.11.0 # 推荐使用conda安装gdal
