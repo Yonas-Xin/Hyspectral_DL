@@ -50,6 +50,47 @@ class CNN_Dataset(Dataset):
         label = torch.tensor(label, dtype=torch.long)
         image = torch.tensor(image, dtype=torch.float32)
         return image, label
+
+class Predict_Dataset(Dataset):
+    '''构造用于3D编码器的输入''' 
+    def __init__(self, patch_size):
+        self.block_size = patch_size
+        self.data = None
+        self.rows, self.cols = 0, 0
+        self.idx = None
+
+    def __len__(self):
+        return len(self.idx) if self.idx is not None else 0
+    
+    def __getitem__(self, idx):
+        """
+        根据索引返回图像及其光谱
+        """
+        index = self.idx[idx]
+        row = index // self.cols
+        col = index % self.cols # 根据索引生成二维索引
+        block = self.get_samples(row, col)
+        # 转换为 PyTorch 张量
+        block = torch.from_numpy(block).float()
+        return block
+
+    def get_samples(self,row,col):
+        block = self.data[:,row:row + self.block_size, col:col + self.block_size]
+        if self.block_size == 1: # 如果是单像素，数据适配1D CNN的输入
+            block = block.squeeze()
+        return block
+    
+    def update_data(self, data, background_mask=None):
+        """每个 block 更新数据"""
+        rows, cols = background_mask.shape
+        self.data = data
+        self.rows = rows
+        self.cols = cols
+        self.idx = np.arange(self.rows * self.cols)
+
+        mask = background_mask.astype(np.bool)
+        self.idx = self.idx.reshape(self.rows, self.cols)
+        self.idx = self.idx[mask]
     
 class MoniHDF5_leaning_dataset(Dataset):
     def __init__(self, h5_file):

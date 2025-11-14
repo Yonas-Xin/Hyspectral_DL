@@ -225,7 +225,8 @@ def save_model(frame, model, optimizer, scheduler, epoch=None, avg_loss=None, av
         torch.save(model, frame.model_best_path_pt) # 保存整个模型结构
         print(f"============The best checkpoint saved at epoch {epoch}============")
 
-def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, scheduler=None, ck_pth=None):
+def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, scheduler=None, 
+          ck_pth=None, experiment_name="CNN_Model_Training"):
     def finish_work(): # 结束工作，打印最终结果
         formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         best_result = f'{formatted_time} Model saved at Epoch {model_save_epoch}. \
@@ -248,7 +249,7 @@ def train(frame, model, optimizer, train_dataloader, eval_dataloader=None, sched
     load_parameter(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, ck_pth=ck_pth) # 初始化模型
     if SWANLAB_AVAILABLE:
         run = swanlab.init(
-            project="Cnn_Model_Training",
+            project=experiment_name,
             experiment_name=f"{type(model).__name__}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             config={
                 "model_name": type(model).__name__,

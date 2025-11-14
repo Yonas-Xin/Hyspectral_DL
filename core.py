@@ -95,7 +95,10 @@ class Hyperspectral_Image:
             g_band = self.get_band_data(g)
             b_band = self.get_band_data(b)
         except:
-            print("波段序号最小为1！")
+            print("波段序号无效, 波段序号最小为1! 将默认使用第1个波段合成影像")
+            r_band = self.get_band_data(1)
+            g_band = self.get_band_data(1)
+            b_band = self.get_band_data(1)
         try:# 拉伸出错可能是mask全为False，忽略
             if stretch:
                 r_band = linear_2_percent_stretch(r_band, self.backward_mask)
@@ -150,6 +153,7 @@ class Hyperspectral_Image:
 
     def ignore_backward(self):
         '''分块计算背景掩膜值，默认分块大小为512'''
+        print("Calculating The Whole Background Mask...")
         no_data = self.no_data if self.no_data is not None else nodata_value # 如果原始数据没有nodata值，默认为0
         block_size = 512 if self.cols> (2 * 512) and self.rows > (2 * 512) else min(self.rows, self.cols)
         mask = np.empty((self.rows, self.cols), dtype=bool)

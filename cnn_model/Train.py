@@ -31,19 +31,20 @@ MODEL_DICT = {
     'ResNet50': ResNet50,
     'spec_transformer': spec_transformer,
 }
+EXPERIMENT_NAME = "Cnn_Model_Training" # 实验的名称，控制swanlab实验的管理
 
 model_selected = 'spec_transformer' # 从上面选择一个模型
 config_name = "Test" # 配置输出名称，最后的输出名称为 model_selected_config_name_CurrentTime
 train_images_dir = r'c:\Users\85002\Desktop\test\test\train_dataset\.datasets.txt'  # 训练数据集
 test_images_dir = r'c:\Users\85002\Desktop\test\test\test_dataset\.datasets.txt'  # 测试数据集
-out_classes = 11 # 分类数
+out_classes = None # 分类数, 脚本会自动识别数据集中的分类数, 如果想手动指定分类数, 可以在这里指定
 
 
 epochs = 100 # epoch
 batch = 48 # batch
 init_lr = 3e-4  # lr
 min_lr = 3e-5  # 最低学习率
-warm_up_epochs = 20  # 预热epoch数
+warm_up_epochs = 0  # 预热epoch数
 pretrain_pth = None
 ck_pth = None # 用于断点学习
 if_full_cpu = True  # 是否全负荷cpu
@@ -70,8 +71,10 @@ if __name__ == '__main__':
     list_shuffler.shuffle(test_image_lists)
     train_dataset = CNN_Dataset(train_image_lists)
     eval_dataset = CNN_Dataset(test_image_lists)
+    out_classes = (int(train_image_lists[-1].split(' ')[-1]) + 1) if out_classes is None else out_classes
     model = MODEL_DICT[model_selected](out_classes=out_classes, in_shape=train_dataset.data_shape)  # 模型实例化
     print(f"🎯 Image shape: {train_dataset.data_shape}")
+    print(f"🔢 Number of classes: {out_classes}")
     if pretrain_pth is not None:
         state_dict = torch.load(pretrain_pth, map_location=device)["backbone"]
         model._load_encoer_params(state_dict) # 加载预训练权重
@@ -85,7 +88,7 @@ if __name__ == '__main__':
                                  num_workers=dataloader_num_workers, prefetch_factor=2,
                                  persistent_workers=dataloader_num_workers > 0)  # 数据迭代器
 
-    frame = Cnn_Model_Frame(model_name=f'{model_selected}_{config_name}', 
+    frame = Cnn_Model_Frame(model_name=f'{model_selected}_{config_name}_Patch{train_dataset.data_shape[-1]}', 
                             epochs=epochs+warm_up_epochs, 
                             min_lr=min_lr,
                             device=device, 
@@ -102,4 +105,6 @@ if __name__ == '__main__':
           scheduler=scheduler,
           train_dataloader=train_dataloader, 
           eval_dataloader=eval_dataloader,
-          ck_pth=ck_pth)
+          ck_pth=ck_pth,
+          experiment_name=EXPERIMENT_NAME)
+    sys.exit(0)

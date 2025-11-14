@@ -4,15 +4,11 @@ import torch
 import matplotlib.colors as mcolors
 from datetime import datetime
 ACADEMIC_COLOR = ['#d5e5c9', '#1c6995', '#d9c2df', '#e2795a', '#eac56c', '#299d90', '#895c56', '#1bb5b9',
-                  '#d68e04', '#eea78b', '#459741', '#9566a8', '#a4d2a1', '#e98d49', '#639dfc', '#93a906',]
-
-COLORS = [
-    "#C0FDD8", '#FEC0C1', '#CDC6FF', '#FDC0F7', '#F3D8F1',
-    '#D6EBBF', '#E1CAF7', '#BFDCE2', '#F8F0BE', '#BEEFBF',
-    '#F8C9C8', '#C0E2D2', '#E9BFC0', "#E3E3E3", '#BFBFBF',
-    '#DEECF6', '#AFCBE2', '#E2F2CD', '#B6DAA7', '#F9D5D5',
-    '#EF9BA1', '#FBE3C0', '#FBC99A', '#EBE0EF', '#C2B1D7',
-]
+                  '#d68e04', '#eea78b', '#459741', '#9566a8', '#a4d2a1', '#e98d49', '#639dfc', '#93a906',
+                  "#C0FDD8", '#FEC0C1', '#CDC6FF', '#FDC0F7', '#F3D8F1', '#D6EBBF', '#E1CAF7', '#BFDCE2', 
+                  '#F8F0BE', '#BEEFBF', '#F8C9C8', '#C0E2D2', '#E9BFC0', "#E3E3E3", '#BFBFBF', '#DEECF6', 
+                  '#AFCBE2', '#E2F2CD', '#B6DAA7', '#F9D5D5', '#EF9BA1', '#FBE3C0', '#FBC99A', '#EBE0EF', 
+                  '#C2B1D7'] # 前16个颜色为无重复的学术颜色，其余只是充数的颜色，避免类别过多程序无法运行
 
 class AverageMeter:
     """Computes and stores the average and current value"""
@@ -99,12 +95,11 @@ def block_generator(data, block_size=256):
 def label_to_rgb(t, MAP=ACADEMIC_COLOR):
     '''根据颜色条将label映射到rgb图像'''
     MAP = batch_hex_to_rgb(MAP) # 将HEX值转化为rgb值
-    if not isinstance(t, (np.int8, np.int16, np.int32, np.int64)):
-        t = t.astype(np.int16)
     H, W = t.shape
-    t = t.reshape(-1)
-    rgb = [ [255, 255, 255] if i == -1 else MAP[i] for i in t ] # -1指定映射为白色
-    rgb = np.array(rgb, dtype=np.uint8).reshape(H, W, 3)
+    rgb = np.empty((H, W, 3), dtype=np.uint8)
+    mask = t != -1 # 背景值为-1
+    rgb[mask] = np.array(MAP)[t[mask]]
+    rgb[~mask] = [255, 255, 255]
     return rgb
 
 def hex_to_rgb(value):
