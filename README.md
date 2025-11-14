@@ -35,14 +35,14 @@
 #### 📊 实验管理与可视化
 - **SwanLab 集成**：完整的实验跟踪和管理系统
 - **实时监控**：训练过程中的损失、准确率、学习率等指标实时可视化
-![实验对比](figures\swanlab.jpg)
+![实验对比](./figures/swanlab.jpg)
 - **Grad-CAM**：类激活映射可视化，解释模型决策过程，支持自定义层的特征图绘制与分析
-![特征图绘制](figures\swanlab_特征图可视化.jpg)
+![特征图绘制](./figures/swanlab_特征图可视化.jpg)
 
 #### 🗺️ 大幅影像智能预测
 - **滑窗分块预测**：突破内存与显存限制，支持任意尺寸影像预测
 - **结果可视化**：自动生成分类结果图和 RGB 合成图，保持分类图坐标信息不变
-![预测示意图](figures\预测填图示意图.jpg)
+![预测示意图](./figures/预测填图示意图.jpg)
 
 #### 🛠️ 丰富的工具箱
 - 数据集裁剪与切分
@@ -56,7 +56,7 @@
 ### 环境要求
 - Python >= 3.8
 - PyTorch >= 2.6 (需自行安装)
-- 详细库见 requirements.txt
+- 其余库见 requirements.txt
 
 ### 安装步骤
 
@@ -127,6 +127,7 @@ python contrastive_learning/Train.py
 提前准备样本圈定的**矢量文件**（面矢量或者点矢量，放在**同一文件夹**）与**高光谱影像**
 - **样本集随机划分**：自动划分训练集与测试集
 - **样本集裁剪**：裁剪样本并以txt格式存储样本路径
+
 运行脚本：
 ```python
 # toolbox/split_and_clip_dataset.py
@@ -140,11 +141,11 @@ output_dir = r'c:\out_dir'
 num_to_select = 0.6 # 分割比例
 block_size = 17 # 样本块大小
 ```
-![样本裁剪示意图](figures\样本裁剪示意图.jpg)
+![样本裁剪示意图](./figures/样本裁剪示意图.jpg)
 #### 数据准备
 支持两种数据格式：
 - **TIF/DAT 格式**：标准遥感影像格式
-- **数据集列表文件**：`.datasets.txt` 文件，每行包含 `影像路径,标签路径`
+- **数据集列表文件**：`.datasets.txt` 文件，每行包含 `影像路径 标签`
 
 #### 训练脚本
 ```python
@@ -246,20 +247,6 @@ Hyspectral_DL/
 | **大幅影像预测** | 滑窗分块算法 | 突破显存限制，支持 GB 级高光谱影像 |
 | **SwanLab 管理** | 实验跟踪与可视化 | 高效管理多个实验，便于结果对比 |
 | **模型丰富** | 多种模型可选 | 覆盖多种架构，适应不同场景 |
-
-## 📝 引用
-
-如果本项目对您的研究有帮助，欢迎引用：
-
-```bibtex
-@software{hyspectral_dl,
-  title = {HYSPECTRAL_DL: A Deep Learning Framework for Hyperspectral Image Classification},
-  author = {Yonas-Xin},
-  year = {2025},
-  url = {https://github.com/Yonas-Xin/Hyspectral_DL}
-}
-```
-
 
 ## 👨‍💻 作者
 
