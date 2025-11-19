@@ -4,6 +4,22 @@ import torch.nn.functional as F
 import torch
 import math
 from cnn_model.Models.Spec_Transformer import SpecTransformer
+ENCODER_REGISTRY = {}
+
+def register_encoder(name: str | None = None, 
+                     dim: int = 5, # 编码器接收输入数据的维度
+                     out_channels: int = 128, # 编码器输出的特征维度
+                     feature_map: bool = False): # 编码器是否能够输出特征图
+    """模型注册装饰器, name缺省则用类/函数的 __name__"""
+    def wrapper(obj):
+        key = name or obj.__name__
+        if key in ENCODER_REGISTRY:
+            raise ValueError(f"模型名称重复: {key}")
+        ENCODER_REGISTRY[key] = [obj, dim, out_channels, feature_map]
+        return obj
+    return wrapper
+
+@register_encoder(name='Res_3D_18Net', dim=5, out_channels=512, feature_map=True)
 class Res_3D_18Net_encoder(nn.Module):
     def __init__(self, layers_nums=18, in_shape=None):
         super().__init__()
@@ -15,6 +31,7 @@ class Res_3D_18Net_encoder(nn.Module):
         x = self.avgpool(x)
         return x
 
+@register_encoder(name='Res_3D_34Net', dim=5, out_channels=512, feature_map=True)
 class Res_3D_34Net_encoder(nn.Module):
     def __init__(self, layers_nums=34, in_shape=None):
         super().__init__()
@@ -26,6 +43,7 @@ class Res_3D_34Net_encoder(nn.Module):
         x = self.avgpool(x)
         return x
 
+@register_encoder(name='Res_3D_50Net', dim=5, out_channels=2048, feature_map=True)
 class Res_3D_50Net_encoder(nn.Module):
     def __init__(self, layers_nums=50, in_shape=None):
         super().__init__()
@@ -37,6 +55,7 @@ class Res_3D_50Net_encoder(nn.Module):
         x = self.avgpool(x)
         return x
 
+@register_encoder(name='ResNet18', dim=4, out_channels=512, feature_map=True)
 class ResNet18_encoder(nn.Module):
     def __init__(self, layers_nums=18, in_shape=None):
         super().__init__()
@@ -51,6 +70,7 @@ class ResNet18_encoder(nn.Module):
             x = self.avgpool(x)
         return x
 
+@register_encoder(name='ResNet34', dim=4, out_channels=512, feature_map=True)
 class ResNet34_encoder(nn.Module):
     def __init__(self, layers_nums=34, in_shape=None):
         super().__init__()
@@ -65,6 +85,7 @@ class ResNet34_encoder(nn.Module):
             x = self.avgpool(x)
         return x
 
+@register_encoder(name='ResNet50', dim=4, out_channels=2048, feature_map=True)
 class ResNet50_encoder(nn.Module):
     def __init__(self, layers_nums=50, in_shape=None):
         super().__init__()
@@ -228,6 +249,8 @@ class ResNet_2D(nn.Module): # 不包含平均池化层与线性映射层
         # x = self.fc(x)
         return x
 
+
+@register_encoder(name='SRACN', dim=5, out_channels=512, feature_map=True)
 class SRACN_Encoder(nn.Module): # 以前训练的时候这里的类名为: Spe_Spa_Attenres_Encoder
     '''6个残差块和一个卷积块'''
     def __init__(self, in_shape=None):
@@ -254,6 +277,7 @@ class SRACN_Encoder(nn.Module): # 以前训练的时候这里的类名为: Spe_S
         x = self.avg_pool(self.res_block6(x))
         return x
 
+@register_encoder(name='Common_3DCNN', dim=5, out_channels=512, feature_map=True)
 class Common_3DCNN_Encoder(nn.Module):
     def __init__(self, in_shape=None):
         super().__init__()
@@ -271,6 +295,7 @@ class Common_3DCNN_Encoder(nn.Module):
         x = self.pool2(self.conv4(x))
         return x
 
+@register_encoder(name='Common_1DCNN', dim=3, out_channels=512, feature_map=False)
 class Common_1DCNN_Encoder(nn.Module):
     def __init__(self, in_shape=None):
         super().__init__()
@@ -293,7 +318,8 @@ class Common_1DCNN_Encoder(nn.Module):
         x = self.conv4_2(self.conv4_1(x))
         x = self.pool3(x)         # [B, 128, 1]
         return x
-    
+
+@register_encoder(name='Common_2DCNN', dim=4, out_channels=512, feature_map=True)
 class Common_2DCNN_Encoder(nn.Module):
     def __init__(self, in_shape=None):
         super().__init__()
@@ -606,6 +632,7 @@ class Unet_3DCNN_Encoder(nn.Module):
 
 
 # ============其他论文编码器组件============
+@register_encoder(name='HybridSN', dim=4, out_channels=256, feature_map=False)
 class HybridSN_encoder(nn.Module):
   """code from: https://github.com/gokriznastic/HybridSN
   自适应输入维度"""
@@ -638,6 +665,7 @@ class HybridSN_encoder(nn.Module):
     out = self.fc(out)
     return out
 
+@register_encoder(name='Vgg16', dim=4, out_channels=512, feature_map=True)
 class Vgg16_encoder(nn.Module):
     """code from: https://github.com/Lornatang/VGG-PyTorch
     为了适应小patch数据, 做了点pool的小修改"""
@@ -799,6 +827,8 @@ class ResSPA(nn.Module):
         out = self.bn2(self.spa2(out))
         
         return F.leaky_relu(out + input)
+    
+@register_encoder(name='SSRN', dim=4, out_channels=28, feature_map=True)
 class SSRN_encoder(nn.Module):
     """code form: https://github.com/zilongzhong/SSRN"""
     def __init__(self, in_shape=None):
@@ -849,7 +879,7 @@ class DepthwiseSeparableConv(nn.Module):
         x = self.relu(x)
         return x
 
-
+@register_encoder(name='MobileNetV1', dim=4, out_channels=1024, feature_map=True)
 class MobileNetV1_encoder(nn.Module):
     """code from: https://developer.aliyun.com/article/1309561
        论文地址: https://arxiv.org/abs/1704.04861"""
@@ -924,7 +954,7 @@ class Block(nn.Module):
         out += self.shortcut(x) if self.stride == 1 else out
         return out
  
- 
+@register_encoder(name='MobileNetV2', dim=4, out_channels=1280, feature_map=True)
 class MobileNetV2_encoder(nn.Module):
     def __init__(self, in_shape=None):
         super(MobileNetV2_encoder, self).__init__()
@@ -963,6 +993,7 @@ class MobileNetV2_encoder(nn.Module):
         out = self.avg_pool(out)
         return out
 
+@register_encoder(name='spec_transformer', dim=4, out_channels=768, feature_map=False)
 class SpecTransformer_encoder(nn.Module):
     def __init__(self, in_shape=None):
         super(SpecTransformer_encoder, self).__init__()

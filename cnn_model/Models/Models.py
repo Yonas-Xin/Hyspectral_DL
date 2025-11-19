@@ -1,9 +1,20 @@
 from cnn_model.Models.Encoder import *
 from cnn_model.Models.Decoder import *
 import torch.nn as nn
+ENCODER_REGISTRY = {}
+
+def register_model(name: str | None = None):
+    """模型注册装饰器, name缺省则用类/函数的 __name__"""
+    def wrapper(obj):
+        key = name or obj.__name__
+        if key in ENCODER_REGISTRY:
+            raise ValueError(f"模型名称重复: {key}")
+        ENCODER_REGISTRY[key] = obj
+        return obj
+    return wrapper
 
 class My_Model(nn.Module):
-    def __init__(self, out_classes=None, in_shape=None): # 框架需要两个个输入
+    def __init__(self, out_classes=None, in_shape=None): # 框架需要两个输入
         super().__init__()
         self.lock_grad = True
         self.unfreeze_idx = None
@@ -44,6 +55,7 @@ class My_Model(nn.Module):
                 self.lock_grad = False
                 print(f"{len(skipped)} parameters are skipped, Please check if the pre-trained model is consistent with the parameters of the training model. ")
 
+@register_model()
 class Res_3D_18Net(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -58,6 +70,7 @@ class Res_3D_18Net(My_Model):
         x = self.decoder(x)
         return x
 
+@register_model()
 class Res_3D_34Net(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -71,7 +84,8 @@ class Res_3D_34Net(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
+
+@register_model() 
 class Res_3D_50Net(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -85,7 +99,8 @@ class Res_3D_50Net(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
+
+@register_model()
 class Common_3DCNN(My_Model):
     '''浅层3D CNN模型'''
     def __init__(self, out_classes, in_shape=None):
@@ -103,6 +118,7 @@ class Common_3DCNN(My_Model):
         x = self.decoder(x)
         return x
 
+@register_model()
 class Common_1DCNN(My_Model):
     '''浅层1D CNN模型'''
     def __init__(self, out_classes, in_shape=None):
@@ -133,6 +149,7 @@ class Common_1DCNN(My_Model):
     def if_draw_feature_map(self):
         return False
 
+@register_model()
 class Common_2DCNN(My_Model):
     '''浅层1D CNN模型'''
     def __init__(self, out_classes, in_shape=None):
@@ -148,7 +165,8 @@ class Common_2DCNN(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
+
+@register_model()
 class SRACN(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -175,6 +193,7 @@ class SRACN(My_Model):
 
 
 # ==============================其他论文中的模型==============================
+@register_model()
 class SSRN(My_Model):
     """code from: https://github.com/zilongzhong/SSRN SSRN以4D 为输入"""
     def __init__(self, out_classes, in_shape=None):
@@ -191,7 +210,8 @@ class SSRN(My_Model):
         x = x.squeeze()
         x = self.decoder(x)
         return x
-    
+
+@register_model()
 class HybridSN(My_Model):
     """code from: https://github.com/gokriznastic/HybridSN
     自适应输入维度"""
@@ -214,6 +234,7 @@ class HybridSN(My_Model):
         x = self.decoder(x)
         return x
 
+@register_model("Vgg16")
 class Vgg16_net(My_Model):
     """code from: https://github.com/Lornatang/VGG-PyTorch
     为了适应小patch数据, 做了点pool的小修改"""
@@ -242,6 +263,7 @@ class Vgg16_net(My_Model):
         x=self.decoder(x)
         return x
 
+@register_model()
 class MobileNetV1(My_Model):
     """code from: https://developer.aliyun.com/article/1309561
     论文地址: https://arxiv.org/abs/1704.04861"""
@@ -260,6 +282,7 @@ class MobileNetV1(My_Model):
         x=self.decoder(x)
         return x
 
+@register_model()
 class MobileNetV2(My_Model):
     """code from: https://blog.csdn.net/Code_and516/article/details/130200844
     论文地址: https://arxiv.org/abs/1801.04381"""
@@ -277,7 +300,8 @@ class MobileNetV2(My_Model):
         x = x.squeeze()
         x=self.decoder(x)
         return x
-    
+
+@register_model()
 class ResNet18(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -291,7 +315,8 @@ class ResNet18(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
+
+@register_model()
 class ResNet34(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -305,6 +330,8 @@ class ResNet34(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
+
+@register_model()
 class ResNet50(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -318,7 +345,8 @@ class ResNet50(My_Model):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
+
+@register_model()
 class spec_transformer(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
