@@ -4,7 +4,7 @@ except ImportError:
     print('gdal is not used')
 import os
 import numpy as np
-from gdal_utils import write_data_to_tif, point_shp_to_mask, mask_to_point_shp, mutipoint_shp_to_mask, Mianvector2mask, nodata_value
+from gdal_utils import write_data_to_tif, point_shp_to_mask, mask_to_point_shp, mutipoint_shp_to_mask, Mianvector2mask
 from algorithms import pca, noise_estimation, MNF
 
 gdal.UseExceptions()
@@ -154,7 +154,9 @@ class Hyperspectral_Image:
     def ignore_backward(self):
         '''分块计算背景掩膜值，默认分块大小为512'''
         print("Calculating The Whole Background Mask...")
-        no_data = self.no_data if self.no_data is not None else nodata_value # 如果原始数据没有nodata值，默认为0
+        no_data = self.no_data if self.no_data is not None else 0 # 如果原始数据没有nodata值，默认为0
+        if self.no_data is None:
+            print("Warning: The input data has no NoData value, default NoData=0 is used!")
         block_size = 512 if self.cols> (2 * 512) and self.rows > (2 * 512) else min(self.rows, self.cols)
         mask = np.empty((self.rows, self.cols), dtype=bool)
         for i in range(0, self.rows, block_size):
@@ -175,7 +177,9 @@ class Hyperspectral_Image:
             if s is None:
                 return slice(None)
             else:return slice(*s) if isinstance(s, tuple) else s
-        no_data = self.no_data if self.no_data is not None else nodata_value # 如果原始数据没有nodata值，默认为0
+        no_data = self.no_data if self.no_data is not None else 0 # 如果原始数据没有nodata值，默认为0
+        if self.no_data is None:
+            print("Warning: The input data has no NoData value, default NoData=0 is used!")
         ori_dataset = self.get_dataset().transpose(1, 2, 0)
         dataset = ori_dataset[self.backward_mask]
         if f == 'PCA':

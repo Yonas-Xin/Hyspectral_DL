@@ -11,7 +11,6 @@ import time
 import random
 from utils import search_files_in_directory, write_list_to_txt
 
-nodata_value = 0
 GDAL2NP_TYPE = { # GDAL数据类型与numpy数据类型的映射
     gdal.GDT_Byte: ('uint8', np.uint8),
     gdal.GDT_UInt16: ('uint16', np.uint16),
@@ -31,7 +30,7 @@ NP2GDAL_TYPE = {
     np.dtype('float64'): gdal.GDT_Float64
 }
 
-def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=nodata_value, mask=None):
+def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=None, mask=None):
     """
     将数组数据写入GeoTIFF文件
     
@@ -78,7 +77,8 @@ def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=
     for i in range(bands):
         band = dataset.GetRasterBand(i + 1)
         band.WriteArray(data[i,:,:])
-        band.SetNoDataValue(nodata_value)  # 设置 NoData 值
+        if nodata_value is not None:
+            band.SetNoDataValue(nodata_value)  # 设置 NoData 值
     # 释放资源
     dataset.FlushCache()
     dataset = None
