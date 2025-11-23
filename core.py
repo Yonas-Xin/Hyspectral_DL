@@ -10,9 +10,7 @@ from algorithms import pca, noise_estimation, MNF
 gdal.UseExceptions()
 class Hyperspectral_Image:
     '''如果数据是int16类型，自动缩放为0-1的光谱反射率范围'''
-    def __init__(self, input=None):
-        if input is not None:
-            self.init(input)
+    def __init__(self, input=None, init_fig=False):
         self.dataset, self.rows, self.cols, self.bands = None, None, None, None
         self.no_data = None
         self.sampling_position = None # 二维矩阵，标记了样本的取样点和类别信息
@@ -22,6 +20,8 @@ class Hyperspectral_Image:
         self.enhance_img = None #[rows, cols, 3] 增强-拉伸影像
         self.geotransform = None
         self.projection = None
+        if input is not None:
+            self.init(input, init_fig=init_fig)
 
     def __del__(self):
         self.dataset = None # 释放内存
@@ -55,6 +55,7 @@ class Hyperspectral_Image:
     def save_tif(self, filename, img_data, nodata = None, mask=None):
         '''将(rows, cols,  bands)或(rows, cols)的数据存为tif格式, tif具有与img相同的投影信息'''
         nodata = self.no_data if nodata is None else nodata
+        print(f"Attention: The required shape of input data is (rows, cols) or (rows, cols, bands)")
         if len(img_data.shape) == 3:
             write_data_to_tif(filename, img_data.transpose(2,0,1), self.geotransform, self.projection,
                           nodata_value=nodata, mask=mask)

@@ -9,6 +9,13 @@ try:
     import torch
 except ImportError:
     pass
+import re
+import os 
+try:
+    from osgeo import gdal
+    gdal.UseExceptions()
+except ImportError:
+    print('gdal is not used')
 
 def pca(data, n_components=10):
     ''':param data: [rows*cols，bands]'''
@@ -325,3 +332,172 @@ def calculate_euclidean_distances(data):
     mean_values = np.mean(data, axis=0)
     distances = np.sqrt(np.sum((data - mean_values)**2, axis=1)) 
     return distances  # 转换为列表返回
+
+# ==========================================================================
+# -------------------------------高光谱重采样--------------------------------
+# ==========================================================================
+ASSET_DIR = os.path.join(os.path.dirname(__file__), 'assets') # 资源目录
+GDAL2NP_TYPE = { # GDAL数据类型与numpy数据类型的映射
+    gdal.GDT_Byte: ('uint8', np.uint8),
+    gdal.GDT_UInt16: ('uint16', np.uint16),
+    gdal.GDT_Int16: ('int16', np.int16),
+    gdal.GDT_UInt32: ('uint32', np.uint32),
+    gdal.GDT_Int32: ('int32', np.int32),
+    gdal.GDT_Float32: ('float32', np.float32),
+    gdal.GDT_Float64: ('float64', np.float64)
+}
+
+def parse_wavelength_fwhm(file_path):
+    """
+    :param file_path: 包含 wavelength 和 fwhm 定义的文本文件路径
+    :return: (wavelength_array, fwhm_array) 两个 NumPy 数组
+    """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    # 使用非贪婪匹配 .*? 提取 {} 内部的内容
+    pattern_w = re.compile(r'wavelength\s*=\s*\{(.*?)\}', re.DOTALL)
+    pattern_f = re.compile(r'fwhm\s*=\s*\{(.*?)\}', re.DOTALL)
+    w_match = pattern_w.search(content)
+    f_match = pattern_f.search(content)
+    wavelengths = np.array([])
+    fwhms = np.array([])
+    if w_match:
+        wavelengths = np.fromstring(w_match.group(1), sep=',')
+
+    if f_match:
+        fwhms = np.fromstring(f_match.group(1), sep=',')
+    return wavelengths, fwhms
+
+def get_satellite_params():
+    dir = os.path.join(ASSET_DIR, 'resample_params')
+    satellite_list = []
+    for file in os.listdir(dir):
+        if file.endswith('.txt') and "注意事项" not in file:
+            satellite_list.append(file)
+    return satellite_list
+
+def choose_satellite_params(satellite_name):
+    satellite_list = get_satellite_params()
+    satellite_name_list = [satellite[:-4] for satellite in satellite_list]
+    if satellite_name not in satellite_name_list:
+        raise ValueError(f"Satellite '{satellite_name}' not found. Available options: {satellite_name_list}")
+    else:
+        print(f"Using satellite parameters for: {satellite_name}")
+        dir = os.path.join(ASSET_DIR, 'resample_params')
+        file_path = os.path.join(dir, f"{satellite_name}.txt")
+    wavelengths, fwhms = parse_wavelength_fwhm(file_path)
+    return wavelengths, fwhms
+
+class HyperspectralResampler:
+    """
+    高光谱数据重采样类，基于指定卫星传感器的波段参数进行重采样
+    目标中心波段无法覆盖的区域将被设置为0
+    """
+    def __init__(self, input_data_path, satellite_name = 'ZY102E', 
+                 delete_wavelengths = [(0,0), (0,0)]):
+        """    
+            :param input_data_path: 输入高光谱数据路径
+            :param satellite_name: 卫星传感器名称，选择预定义的波段参数
+            :param delete_wavelengths: 重采样后删除指定波段范围列表, 例如 [(1350, 1450), (1800, 1950)]
+        """
+        self.wavelengths, self.fwhm = choose_satellite_params(satellite_name)
+        band_mask_slice = self.check_wavelengths(self.wavelengths) # 检查波段是否有重复, 获取要删除的波段索引范围
+        self.dataset = gdal.Open(input_data_path)
+        self.band_mask = np.ones(len(self.wavelengths), dtype=bool) # 初始化波段掩码
+        if self.dataset.RasterCount != len(self.wavelengths):
+            raise ValueError(f"Input data bands ({self.dataset.RasterCount}) do not match satellite parameters bands ({len(self.wavelengths)}).")
+        if band_mask_slice != (0,0): # 重采样前删除原始数据重复波段
+            self.band_mask[band_mask_slice[0]:band_mask_slice[1]] = False
+            self.wavelengths = self.wavelengths[self.band_mask]
+            self.fwhm = self.fwhm[self.band_mask]
+        self.delete_wavelengths = delete_wavelengths
+
+    def check_wavelengths(self, wavelengths):
+        """
+        检查波长数组是否单调递增且无重复值
+        :param wavelengths: 波长数组
+        :return: (slice_num) 如果有重复波段，返回被删除的波段索引范围, 否则返回(0, 0)
+        """
+        print("=============================== check wavelengths info ===============================")
+        wavelengths_copy = wavelengths.copy()
+        diff = np.diff(wavelengths_copy)
+        index = 0
+        count = 0
+        while np.any(diff <= 0):
+            index = np.where(diff <= 0)[0]
+            # 计算重合波段的上下限
+            low_bound = wavelengths_copy[index + 1]
+            upper_bound = wavelengths_copy[index]
+            repeat_mask = (wavelengths_copy >= low_bound) & (wavelengths_copy <= upper_bound)
+            overlapping_wavelengths = wavelengths_copy[repeat_mask]
+            if count == 0:
+                print(f"Found overlapping wavelengths:\n {overlapping_wavelengths}")
+            upper_index = np.where(overlapping_wavelengths == upper_bound)[0]
+            if (overlapping_wavelengths.size - upper_index) > 2:
+                wavelengths_copy = np.delete(wavelengths_copy, index + 1)
+            else:
+                wavelengths_copy = np.delete(wavelengths_copy, index)
+            diff = np.diff(wavelengths_copy)
+            count += 1
+        slice_num = (index[0], index[0]+count)
+        for i in range(slice_num[0], slice_num[1]):
+            print(f"INFO: The deleted overlapping band {i} ({wavelengths[i]} nm)")
+        return slice_num
+
+    def resample(self, output_path, target_wavelengths, target_fwhm=None):
+        """
+        :param output_path: 重采样后数据的保存路径
+        :param target_wavelengths: 目标波段中心波长列表, np.array
+        :param target_fwhm: 目标波段FWHM列表, np.array 或 None(自动计算)
+        :return: None
+        """
+        rows = self.dataset.RasterYSize
+        cols = self.dataset.RasterXSize
+        bands = self.dataset.RasterCount
+        data_type = self.dataset.GetRasterBand(1).DataType # 获取数据类型
+        delete_mask = np.zeros(len(target_wavelengths), dtype=bool)
+        if self.delete_wavelengths is not None: # 重采样后删除指定波段按范围数据
+            for wavelegth_range in self.delete_wavelengths:
+                delete_mask |= (target_wavelengths >= wavelegth_range[0]) & (target_wavelengths <= wavelegth_range[1])
+        
+        print("=============================== resample info ===============================")
+        print(f"The deleted bands: {np.where(delete_mask)[0]} \nwavelengths: {target_wavelengths[delete_mask]}")
+        np_dtype = GDAL2NP_TYPE[data_type][1] # 需要的numpy数据类型
+        resampler = spy.BandResampler(self.wavelengths, target_wavelengths, 
+                                      self.fwhm, target_fwhm) # target_fwhm and fwhm can be None
+
+        driver = gdal.GetDriverByName('GTiff')
+        out_bands = int(len(target_wavelengths) - np.sum(delete_mask))
+        print(f"The remaining bands: {out_bands}.")
+        out_ds = driver.Create(output_path, cols, rows, out_bands, data_type)
+
+        if self.dataset.GetGeoTransform():
+            out_ds.SetGeoTransform(self.dataset.GetGeoTransform())
+        if self.dataset.GetProjection():
+            out_ds.SetProjection(self.dataset.GetProjection())
+
+
+        block_size = 512
+        for i in range(0, rows, block_size):
+            for j in range(0, cols, block_size):
+                # 计算当前块的实际高度和宽度（避免越界）
+                actual_rows = min(block_size, rows - i)
+                actual_cols = min(block_size, cols - j)
+                # 读取当前块的所有波段数据（形状: [bands, actual_rows, actual_cols]）
+                block_data = self.dataset.ReadAsArray(xoff=j, yoff=i, xsize=actual_cols, ysize=actual_rows)
+                block_data = block_data[self.band_mask, :, :]
+                block_data = block_data.reshape(block_data.shape[0], -1)
+
+                resample_data = resampler(block_data)  # 重采样 (target_bands, actual_rows*actual_cols)
+                resample_data = resample_data[~delete_mask]  # 删除指定波段
+                resample_data = np.nan_to_num(resample_data, nan=0)  # 将 NaN 替换为 0
+                resample_data = resample_data.reshape(-1, actual_rows, actual_cols)  # 转回原始形状 [target_bands, actual_rows, actual_cols]
+                resample_data = resample_data.astype(np_dtype)
+                for b in range(resample_data.shape[0]):
+                    out_ds.GetRasterBand(b + 1).WriteArray(resample_data[b], xoff=j, yoff=i)
+        out_ds.FlushCache()
+        out_ds = None  # 关闭文件，确保写入磁盘
+        print(f"Resampled data saved to: {output_path}")
+# ==========================================================================
+# -------------------------------高光谱重采样--------------------------------
+# ==========================================================================
