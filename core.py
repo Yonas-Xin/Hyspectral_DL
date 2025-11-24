@@ -3,12 +3,13 @@ try:
     gdal.UseExceptions()
 except ImportError:
     print('gdal is not used')
+from typing import Generator
 import numpy as np
 from gdal_utils import write_data_to_tif, point_shp_to_mask, mask_to_point_shp, mutipoint_shp_to_mask, Mianvector2mask
 from algorithms import pca, noise_estimation, MNF
 
 class Hyperspectral_Image:
-    def __init__(self, input=None, init_fig=False):
+    def __init__(self, input:str | None = None, init_fig: bool = False):
         self.dataset, self.rows, self.cols, self.bands = None, None, None, None
         self.no_data = None
         self.sampling_position = None # 二维矩阵，标记了样本的取样点和类别信息
@@ -24,7 +25,7 @@ class Hyperspectral_Image:
     def __del__(self):
         self.dataset = None # 释放内存
 
-    def init(self, filepath, init_fig=True, rgb=(1,2,3)):
+    def init(self, filepath: str, init_fig: bool = True, rgb: tuple[int, int, int] = (1,2,3)) -> int:
         try:
             dataset = gdal.Open(filepath)
             bands = dataset.RasterCount
@@ -41,16 +42,16 @@ class Hyperspectral_Image:
         except (AttributeError,RuntimeError):
             return 1
 
-    def create_vector(self, mask, out_file): # mask 转单矢量点
+    def create_vector(self, mask: np.ndarray, out_file: str) -> None: # mask 转单矢量点
         mask_to_point_shp(mask, self.dataset, out_file)
         
-    def create_mask(self, input_file): # 矢量点转mask，点的数值由“class”字段确定
+    def create_mask(self, input_file: str) -> np.ndarray: # 矢量点转mask，点的数值由“class”字段确定
         return point_shp_to_mask(input_file, self.dataset)
     
-    def create_mask_from_mutivector(self, inputdir): # 多矢量点转mask
+    def create_mask_from_mutivector(self, inputdir: str) -> np.ndarray: # 多矢量点转mask
         return mutipoint_shp_to_mask(inputdir, self.dataset)
 
-    def save_tif(self, filename, img_data, nodata = None, mask=None):
+    def save_tif(self, filename: str, img_data: np.ndarray, nodata: float | int | None = None, mask: np.ndarray | None = None) -> bool:
         '''将(rows, cols,  bands)或(rows, cols)的数据存为tif格式, tif具有与img相同的投影信息'''
         nodata = self.no_data if nodata is None else nodata
         if len(img_data.shape) == 3:
@@ -63,31 +64,31 @@ class Hyperspectral_Image:
             raise ValueError("The input dims must be 2 or 3")
         return True
 
-    def init_fig_data(self, rgb = (1,2,3)): # 计算背景掩膜，生成拉伸图像
+    def init_fig_data(self, rgb: tuple[int, int, int] = (1,2,3)): # 计算背景掩膜，生成拉伸图像
         band = self.dataset.GetRasterBand(1)
         self.backward_mask = self.ignore_backward()  # 初始化有效像元位置
         r,g,b = rgb
         self.compose_rgb(r=r, g=g, b=b)
     
-    def Mianvector2raster(self, input_shp, out_tif, nodata=0, fill_value=255):
+    def Mianvector2raster(self, input_shp: str, out_tif: str, nodata: float|int = 0, fill_value: int = 255) -> None:
         '''将矢量面转为栅格，矢量内区域设为fill_value，外部区域设为0，处理结果与原始数据大小一致'''
         mask,_,_ = Mianvector2mask(vector_path=input_shp, tif_path=self.dataset, fill_value=fill_value)
         mask = mask.astype(np.uint8)
         self.save_tif(out_tif, mask, nodata=nodata)
     
-    def Mianvector_clip_tif(self, input_shp, out_tif, nodata=0, fill_value=1):
+    def Mianvector_clip_tif(self, input_shp: str, out_tif: str, nodata: float|int = 0, fill_value: int = 1) -> None:
         '''根据面shp文件对影像进行裁剪，矢量内区域保留，外部区域设为nodata，处理结果与原始数据大小一致'''
         mask,_,_ = Mianvector2mask(vector_path=input_shp, tif_path=self.dataset, fill_value=fill_value)
         mask = mask.astype(bool)
         self.save_tif(out_tif, self.get_dataset(), nodata=nodata, mask=mask) # 保存裁剪影像，原始数据不缩放
 
-    def update(self,r,g,b,show_enhance_img=False): # 根据所选择rgb组合更新拉伸图像
+    def update(self,r: int, g: int, b: int, show_enhance_img: bool = False): # 根据所选择rgb组合更新拉伸图像
         if show_enhance_img:
             self.compose_enhance(r,g,b)
         else:
             self.compose_rgb(r,g,b)
 
-    def compose_rgb(self, r, g, b, stretch=True): # 合成彩色图像
+    def compose_rgb(self, r: int, g: int, b: int, stretch: bool = True) -> np.ndarray: # 合成彩色图像
         try:
             r_band = self.get_band_data(r)
             g_band = self.get_band_data(g)
@@ -112,7 +113,7 @@ class Hyperspectral_Image:
         self.ori_img[self.backward_mask] = rgb
         return self.ori_img
 
-    def compose_enhance(self, r, g, b, stretch=True): # 合成增强彩色图像
+    def compose_enhance(self, r: int, g: int, b: int, stretch: bool = True) -> None: # 合成增强彩色图像
         '''这里为了和tif波段组合统一，读取enhance_data波段数据，波段减一'''
         r_band = self.enhance_data[:, :, r-1]
         g_band = self.enhance_data[:, :, g-1]
@@ -131,21 +132,19 @@ class Hyperspectral_Image:
         self.enhance_img = np.zeros((self.rows, self.cols, 3)) + 1
         self.enhance_img[self.backward_mask] = rgb
 
-    def get_band_data(self, band_idx):
+    def get_band_data(self, band_idx: int) -> np.ndarray:
         """获取指定波段的数据
         :return (rows, cols)"""
-        if self.dataset is None:
-            return None
         band = self.dataset.GetRasterBand(band_idx)
         band_data = band.ReadAsArray()
         return band_data
 
-    def get_dataset(self):
+    def get_dataset(self) -> np.ndarray:
         '''return: (bands, rows, cols)的numpy数组，数据类型为float32'''
         dataset = self.dataset.ReadAsArray()
         return dataset
 
-    def ignore_backward(self):
+    def ignore_backward(self) -> np.ndarray:
         '''分块计算背景掩膜值，默认分块大小为512'''
         print("Calculating The Whole Background Mask...")
         no_data = self.no_data if self.no_data is not None else 0 # 如果原始数据没有nodata值，默认为0
@@ -164,7 +163,11 @@ class Hyperspectral_Image:
                 mask[i:i + actual_rows, j:j + actual_cols] = ~block_mask
         return mask
 
-    def image_enhance(self, f='PCA', n_components=10, row_slice=None, col_slice=None, band_slice=None):
+    def image_enhance(self, f: str = 'PCA', 
+                      n_components: int = 10, 
+                      row_slice: tuple[int, int] | None=None, 
+                      col_slice: tuple[int, int] | None=None, 
+                      band_slice: tuple[int, int] | None=None) -> np.ndarray:
         # 影像增强
         def to_slice(s=None):
             """s:(int, int) or int or None"""
@@ -190,7 +193,7 @@ class Hyperspectral_Image:
         self.compose_enhance(1,2,3)
         return self.enhance_img
 
-    def generate_sampling_mask(self, sample_fraction=0.001):
+    def generate_sampling_mask(self, sample_fraction: float = 0.001) -> np.ndarray:
         """经过该函数进行随机取样，取样位置的标签为1"""
         rows, cols, bands = self.rows, self.cols, self.bands
         mask = self.backward_mask if self.backward_mask is not None else self.ignore_backward()
@@ -206,7 +209,8 @@ class Hyperspectral_Image:
         sampling_position[~mask] = 0
         return sampling_position
 
-    def image_block_iter(self, block_size=256, patch_size=30): # 该迭代器用于预测大影像
+    def image_block_iter(self, block_size: int = 256, 
+                         patch_size: int = 30) -> Generator[tuple[np.ndarray, np.ndarray, int, int], None, None]: # 该迭代器用于预测大影像
         """迭代器，返回分块数据和块的左上角坐标"""
         left_top = int(patch_size / 2 - 1) if patch_size % 2 == 0 else int(patch_size // 2)
         right_bottom = int(patch_size / 2) if patch_size % 2 == 0 else int(patch_size // 2)
@@ -244,7 +248,7 @@ class Hyperspectral_Image:
                 block_sampling_mask = self.backward_mask[i:i + row_block, j:j + col_block]
                 yield block_data, block_sampling_mask, i, j
     
-    def read_dataset_from_mask(self, mask): # 根据mask读取数据，形成数据集, 在机器学习中使用
+    def read_dataset_from_mask(self, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]: # 根据mask读取数据，形成数据集, 在机器学习中使用
         """大影像读取数据集"""
         mask = mask.astype(np.int16)
         index_list = []
@@ -264,7 +268,7 @@ class Hyperspectral_Image:
             data[i, :] = pixel_data
         return data, label
     
-def linear_2_percent_stretch(band_data, mask=None):
+def linear_2_percent_stretch(band_data: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     '''
     线性拉伸
     :param band_data: 单波段数据[rows, cols]
@@ -283,7 +287,7 @@ def linear_2_percent_stretch(band_data, mask=None):
     stretched_band = np.clip((band_data - lower_percentile) / (upper_percentile - lower_percentile), 0, 1)
     return stretched_band
 
-def linear_percent_stretch(band_data, mask=None):
+def linear_percent_stretch(band_data: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     if mask is not None and np.sum(mask) == 0:
         return np.zeros_like(band_data)
     band_data = band_data[mask] if mask is not None else band_data.reshape(band_data.shape[0]*band_data.shape[1])

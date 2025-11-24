@@ -30,7 +30,12 @@ NP2GDAL_TYPE = {
     np.dtype('float64'): gdal.GDT_Float64
 }
 
-def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=None, mask=None):
+def write_data_to_tif(output_file: str, 
+                      data: np.ndarray, 
+                      geotransform: tuple, 
+                      projection: str, 
+                      nodata_value: int | float | None = None, 
+                      mask: np.ndarray | None = None):
     """
     将数组数据写入GeoTIFF文件
     
@@ -98,7 +103,7 @@ def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=
     dataset = None
     return output_file
 
-def read_tif(tif_path):
+def read_tif(tif_path: str | gdal.Dataset) -> tuple[tuple, str, int, int, int]:
     """读取tif文件，返回地理变换、投影、高宽、波段数"""
     need_close = False
     if isinstance(tif_path, str):
@@ -120,7 +125,8 @@ def read_tif(tif_path):
     return im_geotrans, im_proj, im_width, im_height, im_bands
     
 
-def Mianvector2mask(vector_path, tif_path=None, fill_value=255, pixel_size=1.0):
+def Mianvector2mask(vector_path: str, tif_path: str | None = None, 
+                    fill_value: int = 255, pixel_size: float = 1.0) -> tuple[np.ndarray, tuple, str]:
     """
     使用GDAL将矢量文件转换为numpy矩阵（mask矩阵）, 如果提供了width和height则使用，否则根据矢量范围和像素大小创建mask矩阵
     :param vector_path: 矢量文件路径（Shapefile）
@@ -155,7 +161,8 @@ def Mianvector2mask(vector_path, tif_path=None, fill_value=255, pixel_size=1.0):
     mem_raster = None
     return matrix, geotransform, projection
 
-def mask_to_point_shp(mask_matrix, tif_path, output_shapefile="./Position_mask/test.shp"):
+def mask_to_point_shp(mask_matrix: np.ndarray, tif_path: str | gdal.Dataset, 
+                      output_shapefile: str = "./Position_mask/test.shp") -> None:
     """
     将二维矩阵mask矩阵转化为矢量点文件
     """
@@ -195,7 +202,8 @@ def mask_to_point_shp(mask_matrix, tif_path, output_shapefile="./Position_mask/t
     data_source = None
     print(f"{output_shapefile} has been created successfully.")
 
-def mask_to_multipoint_shp(mask_matrix, tif_path, output_dir="./Position_mask", output_dir_name=None):
+def mask_to_multipoint_shp(mask_matrix: np.ndarray, tif_path: str | gdal.Dataset,
+                           output_dir: str = "./Position_mask", output_dir_name: str | None = None) -> None:
     """
     在指定文件夹下创建一个新文件夹保存样本的矢量点文件
     """
@@ -217,7 +225,7 @@ def mask_to_multipoint_shp(mask_matrix, tif_path, output_dir="./Position_mask", 
             input[mask_matrix == label] = label
             mask_to_point_shp(input, tif_path, output_shapefile)
 
-def point_shp_to_mask(shapefile, tif_path, value=None):
+def point_shp_to_mask(shapefile: str, tif_path: str | gdal.Dataset, value: int | None = None) -> np.ndarray:
     """
     将矢量点文件转化为二维矩阵（mask矩阵）
     mask属性值从1开始，背景为0
@@ -260,7 +268,7 @@ def point_shp_to_mask(shapefile, tif_path, value=None):
     data_source = None
     return mask_matrix
 
-def mutipoint_shp_to_mask(shapefile_dir, tif_path):
+def mutipoint_shp_to_mask(shapefile_dir: str, tif_path: str | gdal.Dataset) -> np.ndarray:
     """
     将指定文件夹下的所有矢量点文件转化为二维矩阵（mask矩阵）
     """
@@ -280,7 +288,8 @@ def mutipoint_shp_to_mask(shapefile_dir, tif_path):
         mask_matrix += temp_mask
     return mask_matrix
 
-def clip_by_position(out_dir, sr_img, position_list, patch_size=30, out_tif_name='img', label=None):
+def clip_by_position(out_dir: str, sr_img: str | gdal.Dataset, position_list: list, patch_size: int = 30, 
+                     out_tif_name: str = 'img', label=None) -> list[str]:
     """
     根据掩码矩阵从影像中裁剪指定大小的图像块
     
@@ -385,7 +394,9 @@ def clip_by_position(out_dir, sr_img, position_list, patch_size=30, out_tif_name
         im_dataset = None
     return out_dataset
 
-def clip_by_shp(out_dir, sr_img, shp_path, patch_size=30, out_tif_name='img', label=None, sample_num=10000):
+def clip_by_shp(out_dir: str, sr_img: str | gdal.Dataset, shp_path: str, patch_size: int = 30, 
+                out_tif_name: str = 'img', label: int | None = None, 
+                sample_num: int = 50000) -> list[str]:
     """
     根据点Shapefile从影像中裁剪指定大小的图像块
     
@@ -397,6 +408,7 @@ def clip_by_shp(out_dir, sr_img, shp_path, patch_size=30, out_tif_name='img', la
         out_tif_name (str): 输出文件名前缀，默认'img'
         fill_value (int/float): 边缘填充值，默认0
         label (int): 为输出文件名添加的标签值, 默认None
+        sample_num (int): 如果是面矢量，最大采样点数量, 默认50000
     
     返回:
         list: 生成的图像路径列表, 格式为["path1.tif label1", "path2.tif label2", ...]
@@ -454,7 +466,7 @@ def clip_by_shp(out_dir, sr_img, shp_path, patch_size=30, out_tif_name='img', la
     im_dataset = None
     return out_dataset
 
-def clip_by_multishp(out_dir, sr_img, shp_dir, block_size=30, out_tif_name='img'):
+def clip_by_multishp(out_dir: str, sr_img: str | gdal.Dataset, shp_dir: str, block_size: int = 30, out_tif_name: str = 'img'):
     """
     批量处理目录下多个Shapefile的裁剪任务, 并自动生成记录样本块与标签的数据集
     
@@ -495,7 +507,8 @@ def clip_by_multishp(out_dir, sr_img, shp_dir, block_size=30, out_tif_name='img'
         raise RuntimeError(f'Invalid point_shp_dir: {shp_dir}, it should be a directory or a shapefile path')
     
 
-def batch_raster_to_vector(tif_dir, shp_img_path, extension='.tif', dict=None, delete_value=0, if_smooth=False):
+def batch_raster_to_vector(tif_dir: str, shp_img_path: str, extension: str = '.tif', dict: dict | None = None, 
+                           delete_value: int = 0, if_smooth: bool = False):
     """
     批量栅格转矢量, code by why
     :param tif_dir: 输入的需要处理的栅格文件夹
@@ -607,7 +620,8 @@ def batch_raster_to_vector(tif_dir, shp_img_path, extension='.tif', dict=None, d
             smooth_shp_full_path = shp_img_path + '/' + 'smooth_' + base_name[:-4] + '.shp'
             smoothing(shp_full_path, smooth_shp_full_path, bdistance=0.15)
 
-def mask2poly(mask_array, geotransform, projection, outshp, field_name='value', remove_zero=True):
+def mask2poly(mask_array: np.ndarray, geotransform: tuple, projection: str, outshp: str, 
+              field_name: str = 'value', remove_zero: bool = True):
     """
     将内mask数组转换为面矢量
     
@@ -691,7 +705,7 @@ def mask2poly(mask_array, geotransform, projection, outshp, field_name='value', 
     mem_raster = None
     band = None
 
-def random_split_shp(input_shp, output_shp1, output_shp2, num_to_select, pixel_size=29):
+def random_split_shp(input_shp: str, output_shp1: str, output_shp2: str, num_to_select: int | float, pixel_size: int = 29):
     """
     随机分割点Shapefile为两个新文件
 
@@ -796,7 +810,7 @@ def random_split_shp(input_shp, output_shp1, output_shp2, num_to_select, pixel_s
         print(f"已随机选择 {num_to_select} 个要素保存到: {output_shp1}")
         print(f"剩余 {total_features - num_to_select} 个要素保存到: {output_shp2}")
 
-def batch_random_split_shp(input_shp_dir, output_dir, num_to_select, pixel_size=29):
+def batch_random_split_shp(input_shp_dir: str, output_dir: str, num_to_select: int | float, pixel_size: int = 29):
     """
     批量随机分割点Shapefile为两个新文件
     

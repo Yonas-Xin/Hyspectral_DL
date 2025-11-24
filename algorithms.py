@@ -347,7 +347,7 @@ GDAL2NP_TYPE = { # GDAL数据类型与numpy数据类型的映射
     gdal.GDT_Float64: ('float64', np.float64)
 }
 
-def parse_wavelength_fwhm(file_path):
+def parse_wavelength_fwhm(file_path: str) -> tuple[np.ndarray, np.ndarray]:
     """
     :param file_path: 包含 wavelength 和 fwhm 定义的文本文件路径
     :return: (wavelength_array, fwhm_array) 两个 NumPy 数组
@@ -376,7 +376,7 @@ def get_satellite_params():
             satellite_list.append(file)
     return satellite_list
 
-def choose_satellite_params(satellite_name):
+def choose_satellite_params(satellite_name: str) -> tuple[np.ndarray, np.ndarray]:
     satellite_list = get_satellite_params()
     satellite_name_list = [satellite[:-4] for satellite in satellite_list]
     if satellite_name not in satellite_name_list:
@@ -393,8 +393,8 @@ class HyperspectralResampler:
     高光谱数据重采样类，基于指定卫星传感器的波段参数进行重采样
     目标中心波段无法覆盖的区域将被设置为0
     """
-    def __init__(self, input_data_path, satellite_name = 'ZY102E', 
-                 delete_wavelengths = [(0,0), (0,0)]):
+    def __init__(self, input_data_path: str, satellite_name: str = 'ZY102E', 
+                 delete_wavelengths: list[tuple[float, float]] = [(0,0), (0,0)]):
         """    
             :param input_data_path: 输入高光谱数据路径
             :param satellite_name: 卫星传感器名称，选择预定义的波段参数
@@ -412,7 +412,7 @@ class HyperspectralResampler:
             self.fwhm = self.fwhm[self.band_mask]
         self.delete_wavelengths = delete_wavelengths
 
-    def check_wavelengths(self, wavelengths):
+    def check_wavelengths(self, wavelengths: np.ndarray):
         """
         检查波长数组是否单调递增且无重复值
         :param wavelengths: 波长数组
@@ -444,13 +444,22 @@ class HyperspectralResampler:
             print(f"INFO: The deleted overlapping band {i} ({wavelengths[i]} nm)")
         return slice_num
 
-    def resample(self, output_path, target_wavelengths, target_fwhm=None):
+    def resample(self, output_path: str, 
+                 target_satellite_name: str | None = None, 
+                 target_wavelengths: np.ndarray | None = None, 
+                 target_fwhm: np.ndarray | None = None)-> None:
         """
         :param output_path: 重采样后数据的保存路径
+        :param target_satellite_name: 目标卫星传感器名称, 在assts/resample_params文件夹中预定义
         :param target_wavelengths: 目标波段中心波长列表, np.array
         :param target_fwhm: 目标波段FWHM列表, np.array 或 None(自动计算)
         :return: None
         """
+        if target_satellite_name is not None:
+            target_wavelengths, target_fwhm = choose_satellite_params(target_satellite_name)
+        else:
+            if target_wavelengths is None:
+                raise ValueError("Either target_satellite_name or target_wavelengths must be provided.")
         rows = self.dataset.RasterYSize
         cols = self.dataset.RasterXSize
         bands = self.dataset.RasterCount

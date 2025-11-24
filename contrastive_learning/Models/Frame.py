@@ -1,22 +1,19 @@
 import sys, os
-base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(base_path)
 import shutil
 from datetime import datetime
 import torch.nn as nn
 from tqdm import tqdm
 from multiprocessing import cpu_count
 import torch
-import traceback
 from utils import AverageMeter, ProgressMeter, topk_accuracy
 import numpy as np
 from torch.nn import DataParallel
 import re
+import logging
 
 try: # 使用swanlab进行实验管理
     import swanlab
     from pytorch_grad_cam import GradCAM
-    from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
     from pytorch_grad_cam.utils.image import show_cam_on_image
     SWANLAB_AVAILABLE = True
 except ImportError:
@@ -33,6 +30,7 @@ class Contrastive_Frame:
         self.use_data_parallel = use_data_parallel # 是否使用DataParallel进行多GPU训练
         self.display_nums = display_nums
         self.model_name = model_name
+        self.logger = None
 
         if device is None:
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -66,6 +64,26 @@ class Contrastive_Frame:
         self.model_best_path = os.path.join(self.model_dir, f'{model_save_name}_best.pth')
         self.model_best_path_pt = os.path.join(self.model_dir, f'{model_save_name}_best.pt')
         self.log_path = os.path.join(self.model_dir, f'{model_save_name}.log')
+        self._setup_logger()
+    
+    def _setup_logger(self):
+        """配置 logging"""
+        self.logger = logging.getLogger(self.model_name)
+        self.logger.propagate = False # 防止日志重复打印
+        self.logger.setLevel(logging.INFO)
+        self.logger.handlers = [] # 清除已有的 handler，防止重复打印
+
+        # File Handler (写入文件)
+        file_handler = logging.FileHandler(self.log_path, mode='w', encoding='utf-8')
+        file_formatter = logging.Formatter('%(message)s') # 文件只记录消息内容
+        file_handler.setFormatter(file_formatter)
+        self.logger.addHandler(file_handler)
+
+        # Console Handler (输出到控制台)
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(message)s') # 控制台只显示消息
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
 
     def find_id(self, ck_pth): # 从ckpt路径中提取ID
         if ck_pth is None:
@@ -197,14 +215,6 @@ def get_leaf_layers_info(model):
             leaf_layers.append(f"({name}) ({module_desc})")
     return leaf_layers
 
-def clean_up(frame):
-    """清理因终端或异常生成的文件"""
-    if not os.path.exists(frame.model_path):
-        if os.path.exists(frame.model_dir):
-            shutil.rmtree(frame.model_dir)
-            print(f"Directory {frame.model_dir} has been removed.")
-    else: pass
-
 
 def load_parameter(frame, model, optimizer, scheduler=None, ck_pth=None): # 加载模型、优化器、调度器
     frame.full_cpu() # 打印配置信息
@@ -226,14 +236,6 @@ def load_parameter(frame, model, optimizer, scheduler=None, ck_pth=None): # 加�
         print(f"Loaded checkpoint from epoch {frame.start_epoch}, current lr {optimizer.param_groups[0]['lr']}")
 
 def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
-    def finish_work():
-        try:
-            formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            result = f'{formatted_time} Model saved at Epoch{model_save_epoch}. The best top1-acc:{frame.epoch_max_acc}. The best training_loss:{frame.train_epoch_min_loss}'
-            log_writer.write(result + '\n')
-            if log_writer is not None: # 确保日志文件被正确关闭
-                log_writer.close()
-        except:pass
     ID = frame.find_id(ck_pth) # 从ckpt路径中提取swanlab的ID
     frame.check_input(model)
     IF_DRAW_FEATURE_MAPS = model.encoder_q.if_draw_feature_maps
@@ -260,7 +262,6 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
         frame.init_files(id=run.id)  # 初始化文件夹和日志文件
     else:
         frame.init_files(id=None)
-    log_writer = open(frame.log_path, 'w')
     if frame.use_data_parallel:
         print(f"Use DataParallel, The number of GPUs is: {torch.cuda.device_count()}")
         model = DataParallel(model, device_ids=range(torch.cuda.device_count()))
@@ -279,96 +280,86 @@ def train(frame, model, optimizer, dataloader, scheduler=None, ck_pth=None):
 
     DAMPLES = []
     # start training
-    try:
-        for epoch in range(frame.start_epoch+1, frame.epochs+1):
-            model.train()
-            formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f'\n{formatted_time} Epoch {epoch}:')
-            for i,block in tqdm(enumerate(dataloader), total=len(dataloader), desc="Train", leave=True):
-                block = block.to(frame.device) # batch,C,H,W
-                batchs = block.size(0)
-                with torch.no_grad():
-                    q = frame.augment(block)
-                    k = frame.augment(block)
-                if not DAMPLES and SWANLAB_AVAILABLE: # 仅在第一个epoch保存样本用于绘图
-                    max_draw_samples = min(batchs, frame.feature_map_num)
-                    DAMPLES.append(block[:max_draw_samples].detach().cpu())
-                    swanlab.log(
-                    {
-                        "samples/original": [swanlab.Image(img[:3]) for img in DAMPLES[0][:max_draw_samples]],
-                        "samples/augmented_q": [swanlab.Image(img[:3]) for img in q.detach()[:max_draw_samples]],
-                        "samples/augmented_k": [swanlab.Image(img[:3]) for img in k.detach()[:max_draw_samples]],
-                    })
-                optimizer.zero_grad()  # 清空梯度
-                if isinstance(model, DataParallel):
-                    model.module.update_key_encoder() # 更新key encoder
-                    q, k = model(q, k) # 前向计算
-                    logits, label = model.module.calculate_logits(q, k) # 计算logits和labels
-                else:
-                    model.update_key_encoder() # 更新key encoder
-                    q, k = model(q, k) # 前向计算
-                    logits, label = model.calculate_logits(q, k) # 计算logits和labels
-                loss = frame.loss(logits, label)
-                acc1, acc5 = topk_accuracy(logits, label, topk=(1, 5))
-
-                loss_note.update(loss.item(), batchs)
-                top1_acc_note.update(acc1.item(), batchs)
-                top5_acc_note.update(acc5.item(), batchs)
-                loss.backward()  # 反向传播
-                optimizer.step()  # 更新权重
-                if (i+1) % interval_printinfo == 0:
-                    Epoch_wirter.display(i+1)
-
-            DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE \
-                and IF_DRAW_FEATURE_MAPS else False
-            if DRAW_FEATURE_MAPS:
-                frame.draw_feature_maps(model, DAMPLES, epoch)
-            
-            dataloader.dataset.reset()
-            current_lr = optimizer.param_groups[0]['lr']
-            epoch_summary = Epoch_wirter.epoch_summary(epoch, f"Lr:{current_lr:.2e}")
-            if SWANLAB_AVAILABLE:
+    for epoch in range(frame.start_epoch+1, frame.epochs+1):
+        model.train()
+        formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f'\n{formatted_time} Epoch {epoch}:')
+        for i,block in tqdm(enumerate(dataloader), total=len(dataloader), desc="Train", leave=True):
+            block = block.to(frame.device) # batch,C,H,W
+            batchs = block.size(0)
+            with torch.no_grad():
+                q = frame.augment(block)
+                k = frame.augment(block)
+            if not DAMPLES and SWANLAB_AVAILABLE: # 仅在第一个epoch保存样本用于绘图
+                max_draw_samples = min(batchs, frame.feature_map_num)
+                DAMPLES.append(block[:max_draw_samples].detach().cpu())
                 swanlab.log(
-                    {
-                        "Loss": loss_note.avg,
-                        "Top1_Acc": top1_acc_note.avg,
-                        "Top5_Acc": top5_acc_note.avg,
-                        "Learning_rate": current_lr
-                    },
-                    step=epoch
-                )
-            log_writer.write(epoch_summary + '\n') # 记录训练过程
-            is_best = False
-            if top1_acc_note.avg > frame.epoch_max_acc: # 使用top1准确率来保存模型
+                {
+                    "samples/original": [swanlab.Image(img[:3]) for img in DAMPLES[0][:max_draw_samples]],
+                    "samples/augmented_q": [swanlab.Image(img[:3]) for img in q.detach()[:max_draw_samples]],
+                    "samples/augmented_k": [swanlab.Image(img[:3]) for img in k.detach()[:max_draw_samples]],
+                })
+            optimizer.zero_grad()  # 清空梯度
+            if isinstance(model, DataParallel):
+                model.module.update_key_encoder() # 更新key encoder
+                q, k = model(q, k) # 前向计算
+                logits, label = model.module.calculate_logits(q, k) # 计算logits和labels
+            else:
+                model.update_key_encoder() # 更新key encoder
+                q, k = model(q, k) # 前向计算
+                logits, label = model.calculate_logits(q, k) # 计算logits和labels
+            loss = frame.loss(logits, label)
+            acc1, acc5 = topk_accuracy(logits, label, topk=(1, 5))
+
+            loss_note.update(loss.item(), batchs)
+            top1_acc_note.update(acc1.item(), batchs)
+            top5_acc_note.update(acc5.item(), batchs)
+            loss.backward()  # 反向传播
+            optimizer.step()  # 更新权重
+            if (i+1) % interval_printinfo == 0:
+                Epoch_wirter.display(i+1)
+
+        DRAW_FEATURE_MAPS = True if (epoch % frame.feature_map_interval == 0 or epoch == 1) and SWANLAB_AVAILABLE \
+            and IF_DRAW_FEATURE_MAPS else False
+        if DRAW_FEATURE_MAPS:
+            frame.draw_feature_maps(model, DAMPLES, epoch)
+        
+        dataloader.dataset.reset()
+        current_lr = optimizer.param_groups[0]['lr']
+        epoch_summary = Epoch_wirter.epoch_summary(epoch, f"Lr:{current_lr:.2e}")
+        if SWANLAB_AVAILABLE:
+            swanlab.log(
+                {
+                    "Loss": loss_note.avg,
+                    "Top1_Acc": top1_acc_note.avg,
+                    "Top5_Acc": top5_acc_note.avg,
+                    "Learning_rate": current_lr
+                },
+                step=epoch
+            )
+        frame.logger.info(epoch_summary)
+        is_best = False
+        if top1_acc_note.avg > frame.epoch_max_acc: # 使用top1准确率来保存模型
+            frame.epoch_max_acc = top1_acc_note.avg
+            frame.train_epoch_min_loss = loss_note.avg
+            model_save_epoch = epoch
+            is_best = True
+        elif top1_acc_note.avg == frame.epoch_max_acc:
+            if loss_note.avg < frame.train_epoch_min_loss:
                 frame.epoch_max_acc = top1_acc_note.avg
                 frame.train_epoch_min_loss = loss_note.avg
                 model_save_epoch = epoch
                 is_best = True
-            elif top1_acc_note.avg == frame.epoch_max_acc:
-                if loss_note.avg < frame.train_epoch_min_loss:
-                    frame.epoch_max_acc = top1_acc_note.avg
-                    frame.train_epoch_min_loss = loss_note.avg
-                    model_save_epoch = epoch
-                    is_best = True
-            save_model(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, 
-                       epoch=epoch, avg_loss=loss_note.avg, avg_acc=top1_acc_note.avg, is_best=is_best)
-            if scheduler is not None:
-                scheduler.step()
-            loss_note.reset()
-            top1_acc_note.reset()
-            top5_acc_note.reset()
-            log_writer.flush()
-        finish_work()
-    except KeyboardInterrupt: # 捕获键盘中断信号
-        finish_work()
-        print(f"Training interrupted due to: KeyboardInterrupt")
-        clean_up(frame=frame)
-    except Exception as e: 
-        print(traceback.format_exc())  # 打印完整的堆栈跟踪
-        clean_up(frame=frame)
-    finally:
-        print(f"Training completed. Program exited.")
-        sys.exit(0)
+        save_model(frame=frame, model=model, optimizer=optimizer, scheduler=scheduler, 
+                    epoch=epoch, avg_loss=loss_note.avg, avg_acc=top1_acc_note.avg, is_best=is_best)
+        if scheduler is not None:
+            scheduler.step()
+        loss_note.reset()
+        top1_acc_note.reset()
+        top5_acc_note.reset()
+    formatted_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    result = f'{formatted_time} Model saved at Epoch{model_save_epoch}. The best top1-acc:{frame.epoch_max_acc}. The best training_loss:{frame.train_epoch_min_loss}'
+    frame.logger.info(result)
   
 class Contrasive_learning_predict_frame:
     def __init__(self, device=None):

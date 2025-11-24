@@ -94,7 +94,6 @@ class ProgressMeter:
         entries = ["Epoch" + self.epoch_fmtstr.format(epoch)]
         entries += [str(meter) for meter in self.meters]
         result = f"{formatted_time} "+"\t".join(entries)+"\t"+other_str
-        print(result)
         return result
 
     def _get_batch_fmtstr(self, num_batches):
@@ -102,7 +101,7 @@ class ProgressMeter:
         fmt = "{:" + str(num_digits) + "d}"
         return "[" + fmt + "/" + fmt.format(num_batches) + "]"
 
-def topk_accuracy(output, target, topk=(1,)): # 计算Top-k准确率
+def topk_accuracy(output, target: torch.Tensor, topk: tuple = (1,)): # 计算Top-k准确率
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
         maxk = max(topk)
@@ -118,7 +117,7 @@ def topk_accuracy(output, target, topk=(1,)): # 计算Top-k准确率
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
-def block_generator(data, block_size=256):
+def block_generator(data: np.ndarray, block_size: int = 256):
     '''迭代器，输入一个影像，返回分块的位置掩膜'''
     if data.ndim == 3:
         rows, cols, _ = data.shape
@@ -132,7 +131,7 @@ def block_generator(data, block_size=256):
             position_mask[i:i+actual_rows, j:j+actual_cols] = 1
             yield position_mask
 
-def label_to_rgb(t, MAP=get_full_academic_color_256(), background_value=-1):
+def label_to_rgb(t: np.ndarray, MAP: list = get_full_academic_color_256(), background_value: int = -1) -> np.ndarray:
     '''根据颜色条将label映射到rgb图像'''
     MAP = batch_hex_to_rgb(MAP) # 将HEX值转化为rgb值
     H, W = t.shape
@@ -142,15 +141,15 @@ def label_to_rgb(t, MAP=get_full_academic_color_256(), background_value=-1):
     rgb[~mask] = [255, 255, 255]
     return rgb
 
-def hex_to_rgb(value):
+def hex_to_rgb(value: str) -> list[int]:
     rgb = mcolors.hex2color(value)
     rgb_255 = [int(round(x * 255)) for x in rgb]
     return rgb_255
 
-def batch_hex_to_rgb(value_list : list):
+def batch_hex_to_rgb(value_list : list[str]) -> list[list[int]]:
     return [hex_to_rgb(i) for i in value_list]
 
-def search_files_in_directory(directory, extension):
+def search_files_in_directory(directory: str, extension: str | tuple) -> list[str]:
     """
     搜索指定文件夹中所有指定后缀名的文件，并返回文件路径列表,只适用于不需要标签训练的模型，因为返回的列表顺序可能和
     需要的顺序不同，使用需慎重，但是同一命名规则返回的列表一定是相同的
@@ -174,19 +173,19 @@ def search_files_in_directory(directory, extension):
                     matching_files.append(os.path.join(root, file))
     return matching_files
 
-def read_txt_to_list(filename):
+def read_txt_to_list(filename: str) -> list[str]:
     with open(filename, 'r') as file:
         # 逐行读取文件并去除末尾的换行符
         data = [line.strip() for line in file.readlines()]
     return data
 
-def write_list_to_txt(data, filename):
+def write_list_to_txt(data: list[str], filename: str) -> None:
     with open(filename, 'w') as file:
         for item in data:
             file.write(f"{item}\n")  # 每个元素后加上换行符
         file.flush()
         
-def read_dataset_from_txt(txt_file):
+def read_dataset_from_txt(txt_file: str) -> list[str]:
     'txt文件绝对地址'
     parent_dir = os.path.dirname(txt_file)
     paths = read_txt_to_list(txt_file)
@@ -194,7 +193,7 @@ def read_dataset_from_txt(txt_file):
     y = [os.path.join(parent_dir, i) for i in x]
     return y
 
-def save_matrix_to_csv(matrix, filename, delimiter=','):
+def save_matrix_to_csv(matrix: np.ndarray | torch.Tensor, filename: str, delimiter: str = ',') -> None:
     """
     将 NumPy 矩阵或 PyTorch 张量（二维）保存为 CSV 文件
     
@@ -218,7 +217,7 @@ def save_matrix_to_csv(matrix, filename, delimiter=','):
     np.savetxt(filename, matrix, delimiter=delimiter, fmt='%s')
     print(f"data has been saved as csv: {filename}")
 
-def read_csv_to_matrix(filename, delimiter=','):
+def read_csv_to_matrix(filename: str, delimiter: str = ',') -> np.ndarray:
     """
     从 CSV 文件读取数据并转换为 NumPy 矩阵
     
