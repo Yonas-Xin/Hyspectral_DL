@@ -3,12 +3,52 @@ import os
 import torch
 import matplotlib.colors as mcolors
 from datetime import datetime
-ACADEMIC_COLOR = ['#d5e5c9', '#1c6995', '#d9c2df', '#e2795a', '#eac56c', '#299d90', '#895c56', '#1bb5b9',
-                  '#d68e04', '#eea78b', '#459741', '#9566a8', '#a4d2a1', '#e98d49', '#639dfc', '#93a906',
-                  "#C0FDD8", '#FEC0C1', '#CDC6FF', '#FDC0F7', '#F3D8F1', '#D6EBBF', '#E1CAF7', '#BFDCE2', 
-                  '#F8F0BE', '#BEEFBF', '#F8C9C8', '#C0E2D2', '#E9BFC0', "#E3E3E3", '#BFBFBF', '#DEECF6', 
-                  '#AFCBE2', '#E2F2CD', '#B6DAA7', '#F9D5D5', '#EF9BA1', '#FBE3C0', '#FBC99A', '#EBE0EF', 
-                  '#C2B1D7'] # 前16个颜色为无重复的学术颜色，其余只是充数的颜色，避免类别过多程序无法运行
+
+def get_full_academic_color_256():
+    FULL_ACADEMIC_COLOR_256 = [
+    '#D5E5C9', '#1C6995', '#D9C2DF', '#E2795A', '#EAC56C', '#299D90', '#895C56', '#1BB5B9',
+    '#D68E04', '#EEA78B', '#459741', '#9566A8', '#A4D2A1', '#E98D49', '#639DFC', '#93A906',
+    '#C0FDD8', '#FEC0C1', '#CDC6FF', '#FDC0F7', '#F3D8F1', '#D6EBBF', '#E1CAF7', '#BFDCE2',
+    '#F8F0BE', '#BEEFBF', '#F8C9C8', '#C0E2D2', '#E9BFC0', '#E3E3E3', '#BFBFBF', '#DEECF6',
+    '#AFCBE2', '#E2F2CD', '#B6DAA7', '#F9D5D5', '#EF9BA1', '#FBE3C0', '#FBC99A', '#EBE0EF',
+    '#C2B1D7', '#6899E6', '#CF66A6', '#66CC88', '#996B66', '#9366CC', '#CC9C66', '#66B0CC',
+    '#D96672', '#66D96E', '#7D6699', '#CC8D66', '#66BACC', '#D966A4', '#75D966', '#6B6699',
+    '#CC7D66', '#66C4CC', '#D966D6', '#A7D966', '#666E99', '#CC6E66', '#66CCCC', '#C866D9',
+    '#D9D966', '#668099', '#B4CC66', '#66CCB6', '#9666D9', '#D9A766', '#669199', '#C4CC66',
+    '#66CCA2', '#666BD9', '#D97566', '#66A399', '#D3CC66', '#66CC8E', '#669DD9', '#D9668D',
+    '#66B499', '#CCBA66', '#66CC7A', '#66CFD9', '#C666D9', '#66C699', '#CCAA66', '#66CC66',
+    '#669DD9', '#9466D9', '#77CC99', '#CC9B66', '#66CC70', '#66B9D9', '#66D9A4', '#89CC99',
+    '#CC8B66', '#66CC7A', '#66D5D9', '#66D973', '#9ACC99', '#CC7C66', '#66CC85', '#66F1D9',
+    '#7DD966', '#ACCC99', '#CC6C66', '#66CC8F', '#82D9F1', '#AFD966', '#BDCC99', '#BA66CC',
+    '#66CC99', '#9ED9F1', '#E1D966', '#CECC99', '#8866CC', '#66CCA3', '#B9D9F1', '#D99D66',
+    '#DFCC99', '#6677CC', '#66CCAD', '#D5D9F1', '#D96B66', '#F1CC99', '#66A9CC', '#66CCB7',
+    '#F1D9F1', '#D96698', '#E6CCAD', '#66DACC', '#66CCC2', '#F1D9D5', '#C166D9', '#D7CCAD',
+    '#66CCD6', '#66CCCD', '#D5F1D9', '#8F66D9', '#C8CCAD', '#66C0CC', '#66CCD7', '#B9F1D9',
+    '#666AD9', '#B9CCAD', '#66B5CC', '#66CCE1', '#9EF1D9', '#669CD9', '#AACCAD', '#66AACC',
+    '#66CCEB', '#82F1D9', '#66CED9', '#9BCCAD', '#669FCC', '#66CCF5', '#78F1D9', '#8CCCAD',
+    '#6693CC', '#66CCFF', '#66D9BE', '#94F1D9', '#7DCCAD', '#6688CC', '#66C2FF', '#66D98C',
+    '#B0F1D9', '#6ECCAD', '#667DCC', '#66B8FF', '#CCF1D9', '#66CCB2', '#6672CC', '#66ADFF',
+    '#E8F1D9', '#66CC9C', '#6667CC', '#66A3FF', '#F1E8D9', '#66CC86', '#7866CC', '#6698FF',
+    '#F1CCD9', '#66CC70', '#AA66CC', '#668EFF', '#F1B0D9', '#66CC66', '#DC66CC', '#6683FF',
+    '#F194D9', '#6FCC66', '#F166CC', '#6679FF', '#F178D9', '#85CC66', '#CC66DD', '#666EFF',
+    '#B1CC66', '#6A66DD', '#6B6EFF', '#C7CC66', '#666ADD', '#876EFF', '#DDCC66', '#669BDD',
+    '#A36EFF', '#DDC166', '#66CCDD', '#BF6EFF', '#DDB666', '#DB6EFF', '#D99D66', '#DDAB66',
+    '#66DDCD', '#F76EFF', '#DDA066', '#66DDB2', '#F186FF', '#DD9566', '#66DD97', '#D586FF',
+    '#F2D9D5', '#F1CE66', '#8A2BE2', '#FF4500', '#2E8B57', '#DA70D6', '#FF6347', '#40E0D0',
+    '#FF69B4', '#9ACD32', '#FFA500', '#BA55D3', '#00CED1', '#FFB6C1', '#7B68EE', '#00FA9A',
+    '#DDA0DD', '#FFD700', '#ADFF2F', '#FF00FF', '#1E90FF', '#F0E68C', '#E6E6FA', '#98FB98',
+    '#D3D3D3', '#FFDEAD', '#F5F5DC', '#F08080', '#AFEEEE', '#D8BFD8', '#B0C4DE', '#FFFACD',
+    '#E0FFFF', '#FAFAD2', '#FFE4E1', '#F0FFF0', '#F5F5F5', '#FFF0F5', '#F8F8FF', '#F0F8FF',
+    '#F5DEB3', '#DEB887', '#5F9EA0', '#8470FF', '#778899', '#B8860B', '#A9A9A9', '#006400',
+    '#BDB76B', '#8B008B', '#556B2F', '#FF8C00', '#9932CC', '#8B0000', '#E9967A', '#8FBC8F',
+    '#483D8B', '#2F4F4F', '#00CED1', '#9400D3', '#FF1493', '#00BFFF', '#696969', '#FF00FF',
+    '#FFDAB9', '#CD5C5C', '#4B0082', '#FFFFF0', '#F0E68C', '#E6E6FA', '#FFF0F5', '#7CFC00',
+    '#FFF8DC', '#FFEBCD', '#0000FF', '#8A2BE2', '#A52A2A', '#DEB887', '#5F9EA0', '#7FFF00',
+    '#D2691E', '#FF7F50', '#6495ED', '#DC143C', '#00FFFF', '#00008B', '#008B8B', '#B8860B',
+    '#A9A9A9', '#006400', '#BDB76B', '#8B008B', '#556B2F', '#CAFF70', '#D3FF70', '#BCFF70'
+    ]
+    # 前16个颜色为无重复的学术颜色，其余只是充数的颜色
+    return FULL_ACADEMIC_COLOR_256
 
 class AverageMeter:
     """Computes and stores the average and current value"""
@@ -92,12 +132,12 @@ def block_generator(data, block_size=256):
             position_mask[i:i+actual_rows, j:j+actual_cols] = 1
             yield position_mask
 
-def label_to_rgb(t, MAP=ACADEMIC_COLOR):
+def label_to_rgb(t, MAP=get_full_academic_color_256(), background_value=-1):
     '''根据颜色条将label映射到rgb图像'''
     MAP = batch_hex_to_rgb(MAP) # 将HEX值转化为rgb值
     H, W = t.shape
     rgb = np.empty((H, W, 3), dtype=np.uint8)
-    mask = t != -1 # 背景值为-1
+    mask = t != background_value # 确定背景值
     rgb[mask] = np.array(MAP)[t[mask]]
     rgb[~mask] = [255, 255, 255]
     return rgb
@@ -190,3 +230,8 @@ def read_csv_to_matrix(filename, delimiter=','):
         NumPy 矩阵
     """
     return np.loadtxt(filename, delimiter=delimiter, dtype=np.float32)
+
+if __name__ == '__main__':
+    # 测试颜色转换函数
+    color = get_full_academic_color_256()
+    print(len(color))

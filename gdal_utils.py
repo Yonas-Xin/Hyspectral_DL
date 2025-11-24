@@ -9,7 +9,7 @@ from tqdm import tqdm
 from datetime import datetime
 import time
 import random
-from utils import search_files_in_directory, write_list_to_txt
+from utils import search_files_in_directory, write_list_to_txt, get_full_academic_color_256, hex_to_rgb
 
 GDAL2NP_TYPE = { # GDAL数据类型与numpy数据类型的映射
     gdal.GDT_Byte: ('uint8', np.uint8),
@@ -50,9 +50,13 @@ def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=
         rows, cols = data.shape
         bands = 1
         data = data.reshape((1, rows, cols))  # 转换为三维
+        if np.max(data) < 256 and np.min(data) >= 0:
+            create_color_table = True # 如果是单波段且值在0-255之间，则默认创建颜色表
     elif len(data.shape) == 3:
         bands, rows, cols = data.shape
+        create_color_table = False
     else:
+        create_color_table = False
         raise ValueError("输入数据必须是二维或三维数组")
     
     try:
@@ -74,6 +78,16 @@ def write_data_to_tif(output_file, data, geotransform, projection, nodata_value=
         dataset.SetGeoTransform(geotransform)
         dataset.SetProjection(projection)
     # 写入数据
+    if create_color_table: # 如果需要创建颜色表
+        rgb_colors = [tuple(hex_to_rgb(color)) for color in get_full_academic_color_256()]
+        max_val = min(len(rgb_colors), 255)
+        out_band = dataset.GetRasterBand(1)
+        colors = gdal.ColorTable()
+        for val in range(max_val):
+            colors.SetColorEntry(int(val), rgb_colors[int(val)])
+        out_band.SetRasterColorTable(colors)
+        out_band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
+
     for i in range(bands):
         band = dataset.GetRasterBand(i + 1)
         band.WriteArray(data[i,:,:])
@@ -817,10 +831,4 @@ def batch_random_split_shp(input_shp_dir, output_dir, num_to_select, pixel_size=
         raise RuntimeError(f'Invalid input_shp_dir: {input_shp_dir}, it should be a directory or a shapefile path')
 
 if __name__ == '__main__':
-    clip_by_multishp(
-        out_dir=r'c:\Users\85002\Desktop\构造解译示意\test2',
-        sr_img=r'C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\ZY_result\Image\research_area1_3bands.dat',
-        shp_dir=r'c:\Users\85002\OneDrive\文档\小论文\dataset11classes\d6-4new\split_part1',
-        block_size=13,
-        out_tif_name='img'
-    )
+    pass
