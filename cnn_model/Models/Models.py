@@ -1,15 +1,15 @@
 from cnn_model.Models.Encoder import *
 from cnn_model.Models.Decoder import *
 import torch.nn as nn
-ENCODER_REGISTRY = {}
+MODEL_REGISTRY = {}
 
 def register_model(name: str | None = None):
     """模型注册装饰器, name缺省则用类/函数的 __name__"""
     def wrapper(obj):
         key = name or obj.__name__
-        if key in ENCODER_REGISTRY:
+        if key in MODEL_REGISTRY:
             raise ValueError(f"模型名称重复: {key}")
-        ENCODER_REGISTRY[key] = obj
+        MODEL_REGISTRY[key] = obj
         return obj
     return wrapper
 

@@ -16,8 +16,6 @@ def read_tif_with_gdal(tif_path):
     返回dataset[bands,H,W]'''
     dataset = gdal.Open(tif_path)
     dataset = dataset.ReadAsArray()
-    if dataset.dtype == np.int16:
-        dataset = dataset.astype(np.float32) * 1e-4
     return dataset
 class CNN_Dataset(Dataset):
     '''用于3D——CNN训练和测试'''
@@ -71,7 +69,7 @@ class Predict_Dataset(Dataset):
         col = index % self.cols # 根据索引生成二维索引
         block = self.get_samples(row, col)
         # 转换为 PyTorch 张量
-        block = torch.from_numpy(block).float()
+        block = torch.tensor(block, dtype=torch.float32)
         return block
 
     def get_samples(self,row,col):

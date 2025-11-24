@@ -20,8 +20,6 @@ def read_tif_with_gdal(tif_path):
     返回dataset[bands,H,W]'''
     dataset = gdal.Open(tif_path)
     dataset = dataset.ReadAsArray()
-    if dataset.dtype == np.int16:
-        dataset = dataset.astype(np.float32) * 1e-4
     return dataset
 
 class Contrastive_Dataset(Dataset):
@@ -48,7 +46,7 @@ class Contrastive_Dataset(Dataset):
         bands, h, w = image.shape
         if h == 1 and w == 1:  # 自动识别1D 输入
             image = image.squeeze() # (bands,)
-        image = torch.from_numpy(image).float()
+        image = torch.tensor(image, dtype=torch.float32)
         return image
     
     def reset(self):
@@ -202,21 +200,17 @@ class DynamicCropDataset(Dataset):
         if read_width > 0 and read_height > 0:
             if self.im_bands > 1:
                 data = self.im_dataset.ReadAsArray(read_x, read_y, read_width, read_height)
-                if data.dtype == np.int16:
-                    data = data.astype(np.float32) * 1e-4
                 offset_x = read_x - x_start
                 offset_y = read_y - y_start
                 block[:, offset_y:offset_y+read_height, offset_x:offset_x+read_width] = data
             else:
                 data = self.im_dataset.GetRasterBand(1).ReadAsArray(read_x, read_y, read_width, read_height)
-                if data.dtype == np.int16:
-                    data = data.astype(np.float32) * 1e-4
                 offset_x = read_x - x_start
                 offset_y = read_y - y_start
                 block[offset_y:offset_y+read_height, offset_x:offset_x+read_width] = data
         
         # 转换为torch张量
-        block = torch.from_numpy(block)
+        block = torch.tensor(block, dtype=torch.float32)
         if self.patch_size == 1:
             block = block.squeeze()
         
@@ -368,12 +362,10 @@ class MIRBS_Dataset(Dataset):
                            0, dtype=np.float32)
         if read_width > 0 and read_height > 0:
             data = dataset.ReadAsArray(read_col, read_row, read_width, read_height)
-            if data.dtype == np.int16:
-                data = data.astype(np.float32) * 1e-4
             offset_x = read_col - col_start
             offset_y = read_row - row_start
             block[:, offset_y:offset_y+read_height, offset_x:offset_x+read_width] = data
-        block = torch.from_numpy(block)
+        block = torch.tensor(block, dtype=torch.float32)
         if self.patch_size == 1:
             block = block.squeeze()
         return block

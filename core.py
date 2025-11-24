@@ -1,15 +1,13 @@
 try:
     from osgeo import gdal
+    gdal.UseExceptions()
 except ImportError:
     print('gdal is not used')
-import os
 import numpy as np
 from gdal_utils import write_data_to_tif, point_shp_to_mask, mask_to_point_shp, mutipoint_shp_to_mask, Mianvector2mask
 from algorithms import pca, noise_estimation, MNF
 
-gdal.UseExceptions()
 class Hyperspectral_Image:
-    '''如果数据是int16类型，自动缩放为0-1的光谱反射率范围'''
     def __init__(self, input=None, init_fig=False):
         self.dataset, self.rows, self.cols, self.bands = None, None, None, None
         self.no_data = None
@@ -55,7 +53,6 @@ class Hyperspectral_Image:
     def save_tif(self, filename, img_data, nodata = None, mask=None):
         '''将(rows, cols,  bands)或(rows, cols)的数据存为tif格式, tif具有与img相同的投影信息'''
         nodata = self.no_data if nodata is None else nodata
-        print(f"Attention: The required shape of input data is (rows, cols) or (rows, cols, bands)")
         if len(img_data.shape) == 3:
             write_data_to_tif(filename, img_data.transpose(2,0,1), self.geotransform, self.projection,
                           nodata_value=nodata, mask=mask)
@@ -82,7 +79,7 @@ class Hyperspectral_Image:
         '''根据面shp文件对影像进行裁剪，矢量内区域保留，外部区域设为nodata，处理结果与原始数据大小一致'''
         mask,_,_ = Mianvector2mask(vector_path=input_shp, tif_path=self.dataset, fill_value=fill_value)
         mask = mask.astype(bool)
-        self.save_tif(out_tif, self.get_dataset(scale=1), nodata=nodata, mask=mask) # 保存裁剪影像，原始数据不缩放
+        self.save_tif(out_tif, self.get_dataset(), nodata=nodata, mask=mask) # 保存裁剪影像，原始数据不缩放
 
     def update(self,r,g,b,show_enhance_img=False): # 根据所选择rgb组合更新拉伸图像
         if show_enhance_img:
@@ -141,15 +138,11 @@ class Hyperspectral_Image:
             return None
         band = self.dataset.GetRasterBand(band_idx)
         band_data = band.ReadAsArray()
-        if band_data.dtype == np.int16:  # 如果是int16类型数据，进行缩放
-            band_data = band_data.astype(np.float32) / 10000
         return band_data
 
-    def get_dataset(self, scale=1e-4):
+    def get_dataset(self):
         '''return: (bands, rows, cols)的numpy数组，数据类型为float32'''
         dataset = self.dataset.ReadAsArray()
-        if dataset.dtype == np.int16 and scale != 1: # 如果是int16类型数据并且scale不为1，进行缩放
-            dataset = dataset.astype(np.float32) * scale
         return dataset
 
     def ignore_backward(self):
@@ -243,8 +236,6 @@ class Hyperspectral_Image:
                     bottom_pad = 0
                 # 读取当前块的所有波段数据（形状: [bands, actual_rows, actual_cols]）
                 block_data = self.dataset.ReadAsArray(xoff=xoff, yoff=yoff, xsize=actual_cols, ysize=actual_rows)
-                if block_data.dtype == np.int16:
-                    block_data = block_data.astype(np.float32) * 1e-4
                 block_data = np.pad(block_data, [(0, 0), (top_pad, bottom_pad), (left_pad, right_pad)], 'constant')
                 # 经过上面的计算位于左上区域和中间区域的块大小一律为（image_block + block_size - 1，image_block + block_size - 1）
                 # 比如如果参数是64， 17， 那么裁剪的块大小为（80, 80）
@@ -270,8 +261,6 @@ class Hyperspectral_Image:
         data = np.zeros((num_samples, self.bands), dtype=np.float32)
         for i, (x, y) in enumerate(index_list):
             pixel_data = self.dataset.ReadAsArray(xoff=x, yoff=y, xsize=1, ysize=1).flatten()
-            if pixel_data.dtype == np.int16:
-                pixel_data = pixel_data.astype(np.float32) * 1e-4
             data[i, :] = pixel_data
         return data, label
     
