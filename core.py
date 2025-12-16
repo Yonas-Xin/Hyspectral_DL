@@ -5,7 +5,7 @@ except ImportError:
     print('gdal is not used')
 from typing import Generator
 import numpy as np
-from gdal_utils import write_data_to_tif, point_shp_to_mask, mask_to_point_shp, mutipoint_shp_to_mask, Mianvector2mask
+from gdal_utils import write_data_to_tif, point_shp_to_mask, mask_to_point_shp, mutipoint_shp_to_mask, Mianvector2mask, sieve_filtering
 from algorithms import pca, noise_estimation, MNF
 
 class Hyperspectral_Image:
@@ -50,6 +50,12 @@ class Hyperspectral_Image:
     
     def create_mask_from_mutivector(self, inputdir: str) -> np.ndarray: # 多矢量点转mask
         return mutipoint_shp_to_mask(inputdir, self.dataset)
+    
+    def sieve_filtering(self, output_tif_path: str, threshold_pixels: int, connectedness: int =8) -> None:
+        '''使用GDAL的SieveFilter去除碎斑'''
+        if self.backward_mask is None:
+            self.backward_mask = self.ignore_backward()
+        sieve_filtering(self.dataset, output_tif_path, threshold_pixels, connectedness, mask=self.backward_mask)
 
     def save_tif(self, filename: str, img_data: np.ndarray, nodata: float | int | None = None, mask: np.ndarray | None = None) -> bool:
         '''将(rows, cols,  bands)或(rows, cols)的数据存为tif格式, tif具有与img相同的投影信息'''

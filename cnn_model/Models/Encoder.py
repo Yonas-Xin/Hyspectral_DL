@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import math
-from cnn_model.Models.Spec_Transformer import SpecTransformer
+from cnn_model.Models.Spec_Transformer import SpecTransformer, get_base_configs
 ENCODER_REGISTRY = {}
 
 def register_encoder(name: str | None = None, 
@@ -993,7 +993,7 @@ class MobileNetV2_encoder(nn.Module):
         out = self.avg_pool(out)
         return out
 
-@register_encoder(name='spec_transformer', dim=4, out_channels=768, feature_map=False)
+@register_encoder(name='spec_transformer', dim=4, out_channels=get_base_configs()['hidden_size'], feature_map=False)
 class SpecTransformer_encoder(nn.Module):
     def __init__(self, in_shape=None):
         super(SpecTransformer_encoder, self).__init__()

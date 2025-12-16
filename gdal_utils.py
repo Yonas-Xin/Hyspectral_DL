@@ -55,8 +55,8 @@ def write_data_to_tif(output_file: str,
         rows, cols = data.shape
         bands = 1
         data = data.reshape((1, rows, cols))  # 转换为三维
-        if np.max(data) < 256 and np.min(data) >= 0:
-            create_color_table = True # 如果是单波段且值在0-255之间，则默认创建颜色表
+        if data.dtype == np.uint8:
+            create_color_table = True # 如果是uint8类型则创建颜色表
     elif len(data.shape) == 3:
         bands, rows, cols = data.shape
         create_color_table = False
@@ -79,8 +79,9 @@ def write_data_to_tif(output_file: str,
     if dataset is None:
         raise IOError(f"无法创建文件 {output_file}")
     # 设置地理变换和投影
-    if geotransform is not None and projection is not None:
+    if geotransform is not None:
         dataset.SetGeoTransform(geotransform)
+    if projection is not None:
         dataset.SetProjection(projection)
     # 写入数据
     if create_color_table: # 如果需要创建颜色表
@@ -428,9 +429,9 @@ def clip_by_shp(out_dir: str, sr_img: str | gdal.Dataset, shp_path: str, patch_s
         raise TypeError("sr_img必须是文件路径字符串或GDAL数据集对象")
     
     im_geotrans = im_dataset.GetGeoTransform()
-    im_proj = im_dataset.GetProjection()
-    im_width = im_dataset.RasterXSize
-    im_height = im_dataset.RasterYSize
+    if im_geotrans == (0, 1, 0, 0, 0, 1):
+        print("警告: 该影像无法获取正确的地理参考信息，裁剪结果可能不准确。\n" \
+        "如果是未经几何校正的dat影像，请将其几何校正或者转化为tif格式并指定地理参考后再进行裁剪。")
 
     band = im_dataset.GetRasterBand(1)
     data_type = band.DataType # 获取数据类型
@@ -843,6 +844,54 @@ def batch_random_split_shp(input_shp_dir: str, output_dir: str, num_to_select: i
         random_split_shp(input_shp_dir, output_shp1, output_shp2, num_to_select, pixel_size=pixel_size)
     else:
         raise RuntimeError(f'Invalid input_shp_dir: {input_shp_dir}, it should be a directory or a shapefile path')
+
+def sieve_filtering(input_tif_path, output_tif_path, threshold_pixels, connectedness=8, mask=None):
+    """
+    使用GDAL的SieveFilter去除碎斑
+    :param input_tif_path: 输入的分类结果TIF路径
+    :param output_tif_path: 输出的平滑后TIF路径
+    :param threshold_pixels: 阈值，小于该像素数的连通域将被合并 (例如 50)
+    :param connectedness: 连通性，4代表上下左右，8代表包含对角线 (通常用8)
+    :param mask: 掩膜，指定处理区域，None表示处理所有像素
+    """
+    if isinstance(input_tif_path, gdal.Dataset):
+        src_ds = input_tif_path
+    else:
+        src_ds = gdal.Open(input_tif_path, gdal.GA_ReadOnly)
+        if src_ds is None:
+            raise FileNotFoundError(f"无法打开文件: {input_tif_path}")
+        
+    src_band = src_ds.GetRasterBand(1)
+
+    driver = gdal.GetDriverByName('GTiff')
+    # 创建副本作为输出，避免修改原图
+    dst_ds = driver.CreateCopy(output_tif_path, src_ds, 0)
+    dst_band = dst_ds.GetRasterBand(1)
+    if mask is not None:
+        if mask.dtype == np.bool_:
+            mask = mask.astype(np.uint8)
+        mem_driver = gdal.GetDriverByName('MEM')
+        tmp_mask_ds = mem_driver.Create('', mask.shape[1], mask.shape[0], 1, gdal.GDT_Byte)
+        tmp_mask_band = tmp_mask_ds.GetRasterBand(1)
+        tmp_mask_band.WriteArray(mask)
+        mask_to_use = tmp_mask_band
+
+    print(f"正在处理碎斑... 阈值: {threshold_pixels} 像素")
+    gdal.SieveFilter(
+        src_band,       # 输入波段
+        mask_to_use,           # 掩膜 (None表示处理所有像素)
+        dst_band,       # 输出波段 (直接写入到输出文件)
+        threshold_pixels, 
+        connectedness, 
+        [],             # 额外参数
+        None,           # 进度回调函数
+        None            # 回调数据
+    )
+
+    dst_ds.FlushCache() # 确保数据写入磁盘
+    src_ds = None
+    dst_ds = None
+    print(f"处理完成，结果已保存至: {output_tif_path}")
 
 if __name__ == '__main__':
     pass

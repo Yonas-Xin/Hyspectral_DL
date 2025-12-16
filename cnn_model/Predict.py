@@ -15,9 +15,9 @@ import re
 matplotlib.use('Agg')
 
 output_path = 'SRACN_PRE.tif'
-batch = 128
-input_data = r"C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\ZY_result\Image\research_area1.dat"
-model_pth = r'cnn_model\_results\Common_1DCNN_Test_Patch17_202511272256_IDnkb8of1wa3ej9a11xj0hx\Common_1DCNN_Test_Patch17_202511272256_IDnkb8of1wa3ej9a11xj0hx_best.pt'  # 模型路径
+batch = 256
+input_data = r"C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\haide\haide_rp.dat"
+model_pth = r'C:\Users\85002\Desktop\年度报告测试\Common_1DCNN_patch13_202512101948_best.pt'  # 模型路径
 MUTITHREADING_MODE = False # 是否使用多线程加速数据加载, 实测Fasle时速度更快，根据情况使用
 rgb_combine = (25,15,5) #(29,19,9) # 绘制图像时的rgb组合，从1开始, 如果无效则使用第一个波段, 图像太大时一定程度上会影响速度
 image_block_size = 512 # 分块预测时每个大块的大小，越大越占用内存，但预测速度越快
@@ -65,6 +65,8 @@ if __name__ == '__main__':
                     batch = data.shape[0]
                     data = data.to(device)
                     outputs = model(data)
+                    if outputs.dim() == 1:
+                        outputs = outputs.unsqueeze(0)
                     _, predicted = torch.max(outputs, 1)
                     predict_data[idx:idx + batch, ] = predicted
                     idx += batch
