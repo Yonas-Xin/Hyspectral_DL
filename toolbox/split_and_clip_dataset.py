@@ -5,9 +5,9 @@ import os
 from osgeo import gdal
 """待裁剪的影像与shp样本都必须有正确的地理参考，同时最好保证有投影(几何校正)，且投影一致。"""
 
-input_tif = r'C:\Users\85002\Desktop\TempDIR\haide.tif' # 裁剪区域栅格影像
-input_shp_dir = r'c:\Users\85002\OneDrive - cugb.edu.cn\Word\小组项目\240922张川-铀矿探测\2025\年度报告\年度报告测试\样本shp'
-output_dir = r'c:\Users\85002\Desktop\TempDIR\333'
+input_tif = r'' # 裁剪区域栅格影像
+input_shp_dir = r''
+output_dir = r''
 num_to_select = 0.6 # 要随机选取的要素数量, 如果小于1将按照比例选取
 block_size = 17 # 样本块大小
 

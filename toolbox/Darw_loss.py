@@ -179,7 +179,7 @@ def plot_accuracy_curves(train_acc_list, val_acc_list,
 
 if __name__=='__main__':
     save_path = 'Comparison.png'
-    log_file_path1 = r"C:\Users\85002\Desktop\GF5result\train_process\SSAR_15classes_graunfreeze_nopretrain_202506242120.log"
+    log_file_path1 = r""
     train_accuracy1,test_accuracy1 = find_target_from_log(log_file_path1, find_target='Accuracy: ')
 
     title='Model Accuracy Comparison'

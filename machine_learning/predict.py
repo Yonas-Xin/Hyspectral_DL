@@ -6,8 +6,8 @@ import pickle
 from utils import label_to_rgb
 import matplotlib.pyplot as plt
 
-input_data_path = r'C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\ZY_result\Image\research_area1.dat'
-input_model_path = r'D:\Programing\pythonProject\Hspectral_Analysis\rf_model.pkl'
+input_data_path = r''
+input_model_path = r''
 out_tif_path = r'rf_result.tif'
 if __name__ == '__main__':
     print("Processing data...")

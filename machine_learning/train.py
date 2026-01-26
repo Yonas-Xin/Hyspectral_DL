@@ -140,9 +140,9 @@ def train_svm_model(X_train, y_train, X_test, y_test, config_name = 'svm_model',
 
     return clf
 
-input_tif = r'C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\ZY_result\Image\research_area1.dat'
-train_shp_dir = r'c:\Users\85002\OneDrive\文档\小论文\dataset\dataset_50'
-test_shp_dir = r'c:\Users\85002\OneDrive\文档\小论文\dataset\dataset_100测试集'
+input_tif = r''
+train_shp_dir = r''
+test_shp_dir = r''
 output_path = r'svm_model_new'
 
 func = "SVM" # 'RF' or 'SVM'

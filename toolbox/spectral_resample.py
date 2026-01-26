@@ -3,8 +3,8 @@ sys.path.append('.')
 from algorithms import HyperspectralResampler
 import numpy as np
 
-input = r'C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\haide\haide.dat'
-output = r'C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\haide\haide_resampled.tif'
+input = r''
+output = r''
 
 satellite_name = 'ZY102E' # 输入高光谱的卫星传感器名称，在assts/resample_params文件夹中预定义
 target_satellite_name = None # 目标重采样的卫星传感器名称，在assts/resample_params文件夹中预定义

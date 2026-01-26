@@ -47,9 +47,9 @@ def print_result_report(model, eval_dataloader, log_writer, device):
 if __name__ == '__main__':
     model_name = "Shallow_1DCNN"
     log_path = '1DCNN.log'
-    model_pth = r'D:\Programing\pythonProject\Hspectral_Analysis\cnn_model\_results\models_pth\SSAR_202506261846.pth'
+    model_pth = r''
     batch = 36 # batch
-    test_images_dir = r'D:\Data\Hgy\龚鑫涛试验数据\program_data\handle_class\clip_test_dataset_1x1\.datasets.txt'  # 测试数据集
+    test_images_dir = r''  # 测试数据集
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # 显卡设置
     out_classes = 15 # 分类数
 

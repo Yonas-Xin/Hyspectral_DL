@@ -52,7 +52,7 @@ def split_dataset_to_train_and_eval(dataset:list, ratio):
     return train_data_lists,eval_data_lists
 
 if __name__ == '__main__':
-    dataset_path = r'c:\Users\85002\Desktop\TempDIR\ZY-01-Test\handle_dataset_8classes_400samplesnew\.datasets.txt'
+    dataset_path = r''
 
     datasets = read_txt_to_list(dataset_path)
     base_dir = os.path.dirname(dataset_path)

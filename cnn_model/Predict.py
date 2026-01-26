@@ -16,8 +16,8 @@ matplotlib.use('Agg')
 
 output_path = 'SRACN_PRE.tif'
 batch = 256
-input_data = r"C:\Users\85002\OneDrive - cugb.edu.cn\项目数据\张川铀资源\haide\haide_rp.dat"
-model_pth = r'C:\Users\85002\Desktop\年度报告测试\Common_1DCNN_patch13_202512101948_best.pt'  # 模型路径
+input_data = r""
+model_pth = r'.\model.pt'  # 模型路径
 MUTITHREADING_MODE = False # 是否使用多线程加速数据加载, 实测Fasle时速度更快，根据情况使用
 rgb_combine = (25,15,5) #(29,19,9) # 绘制图像时的rgb组合，从1开始, 如果无效则使用第一个波段, 图像太大时一定程度上会影响速度
 image_block_size = 512 # 分块预测时每个大块的大小，越大越占用内存，但预测速度越快

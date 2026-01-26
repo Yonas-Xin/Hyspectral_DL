@@ -130,5 +130,5 @@ def enhance_dataset(dataset_path_list, out_dir, factor=5, batch = 256):
 #     current_dir = os.getcwd()
 #     enhance_out_dir = os.path.join(current_dir, enhance_out_dir_name)
 
-#     image_paths = read_txt_to_list(r'D:\Programing\pythonProject\Hyperspectral_Analysis\research1_samples_17x17\.datasets.txt')
+#     image_paths = read_txt_to_list(r'')
 #     enhance_dataset(image_paths, enhance_out_dir,5 ,256) # 样本数据扩增
