@@ -1,4 +1,4 @@
-# 🌈 HYSPECTRAL_DL
+# HYSPECTRAL_DL
 
 <div align="center">
 
