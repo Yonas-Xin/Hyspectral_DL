@@ -237,38 +237,5 @@ Hyspectral_DL/
 └── requirements.txt          # 依赖列表
 ```
 
-
-## 📊 性能特点
-
-| 特性 | 描述 | 优势 |
-|------|------|------|
-| **对比学习** | 无监督特征学习 | 充分利用无标签数据，提升模型泛化能力 |
-| **多 GPU 训练** | DataParallel 支持 | 支持单机多卡的对比学习训练 |
-| **大幅影像预测** | 滑窗分块算法 | 突破显存限制，支持 GB 级高光谱影像 |
-| **SwanLab 管理** | 实验跟踪与可视化 | 高效管理多个实验，便于结果对比 |
-| **模型丰富** | 多种模型可选 | 覆盖多种架构，适应不同场景 |
-
-## 👨‍💻 作者
-
-**Yonas-Xin**
-
-- GitHub: [@Yonas-Xin](https://github.com/Yonas-Xin)
-
-## 🙏 致谢
-
-本项目使用了包括但不限于以下开源项目：
-
-- [PyTorch](https://pytorch.org/) - 深度学习框架
-- [GDAL](https://gdal.org/) - 地理空间数据处理
-- [SwanLab](https://swanlab.cn/) - 实验管理平台
-- [Kornia](https://kornia.github.io/) - 计算机视觉库
-- [Grad-CAM](https://github.com/jacobgil/pytorch-grad-cam) - 可视化工具
-
-<div align="center">
-
-**⭐ 如果觉得有用，请给个 Star！ ⭐**
-
-Made with ❤️ by Yonas-Xin
-
 </div>
 
