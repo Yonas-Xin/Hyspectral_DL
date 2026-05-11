@@ -101,72 +101,6 @@ class Res_3D_50Net(My_Model):
         return x
 
 @register_model()
-class Common_3DCNN(My_Model):
-    '''浅层3D CNN模型'''
-    def __init__(self, out_classes, in_shape=None):
-        super().__init__()
-        self.encoder = Common_3DCNN_Encoder() # 3d卷积残差编码器
-        self.decoder = nn.Linear(512, out_features=out_classes)
-    
-    def forward(self, x):
-        if x.dim() == 4:
-            x = x.unsqueeze(1)  # 增加一个维度到 [B, 1, C, H, W]
-        elif x.dim() != 5:
-            raise ValueError(f"Expected input dimension 4 or 5, but got {x.dim()}")
-        x = self.encoder(x)
-        x = x.squeeze()
-        x = self.decoder(x)
-        return x
-
-@register_model()
-class Common_1DCNN(My_Model):
-    '''浅层1D CNN模型'''
-    def __init__(self, out_classes, in_shape=None):
-        super().__init__()
-        self.encoder = Common_1DCNN_Encoder()  # 1D CNN 编码器
-        self.decoder = deep_classfier(512, out_classes)
-
-    def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # 增加一个维度到 [B, 1, bands]
-        elif x.dim() == 4: # [B, c, h, w]
-            _, _, h, w = x.shape
-            left_top = h // 2 - 1 if h % 2 == 0 else h // 2
-            x = x[:, :, left_top, left_top]
-            x = x.unsqueeze(1)
-        elif x.dim() == 5: # [B, 1, c, h, w]
-            x = x.squeeze(1)
-            _, _, h, w = x.shape
-            left_top = h // 2 - 1 if h % 2 == 0 else h // 2
-            x = x[:, :, left_top, left_top]
-            x = x.unsqueeze(1)
-        elif x.dim() != 3:
-            raise ValueError(f"Expected input dimension 2 or 3, but got {x.dim()}")
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
-    
-    def if_draw_feature_map(self):
-        return False
-
-@register_model()
-class Common_2DCNN(My_Model):
-    '''浅层1D CNN模型'''
-    def __init__(self, out_classes, in_shape=None):
-        super().__init__()
-        self.encoder = Common_2DCNN_Encoder(in_shape=in_shape)  # 1D CNN 编码器
-        self.decoder = deep_classfier(512, out_classes)
-
-    def forward(self, x):
-        if x.dim() == 5: # [B, c, h, w]
-            x = x.squeeze(1)
-        elif x.dim() != 4:
-            raise ValueError(f"Expected input dimension 4 or 5, but got {x.dim()}")
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
-
-@register_model()
 class SRACN(My_Model):
     def __init__(self, out_classes, in_shape=None):
         super().__init__()
@@ -193,24 +127,6 @@ class SRACN(My_Model):
 
 
 # ==============================其他论文中的模型==============================
-@register_model()
-class SSRN(My_Model):
-    """code from: https://github.com/zilongzhong/SSRN SSRN以4D 为输入"""
-    def __init__(self, out_classes, in_shape=None):
-        super(SSRN, self).__init__()
-        self.encoder = SSRN_encoder(in_shape=in_shape)
-        self.decoder = nn.Linear(28, out_classes)
-
-    def forward(self, x):
-        if x.dim() == 5: # [B, c, h, w]
-            x = x.squeeze(1)
-        elif x.dim() != 4:
-            raise ValueError(f"Expected input dimension 4 or 5, but got {x.dim()}")
-        x = self.encoder(x)
-        x = x.squeeze()
-        x = self.decoder(x)
-        return x
-
 @register_model()
 class HybridSN(My_Model):
     """code from: https://github.com/gokriznastic/HybridSN

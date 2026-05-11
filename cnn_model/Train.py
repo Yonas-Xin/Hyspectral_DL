@@ -12,14 +12,14 @@ from torch.utils.data import DataLoader
 from multiprocessing import cpu_count
 import random
 # 可选用的模型如下：
-# 'SRACN' 'Common_1DCNN' 'Common_2DCNN' 'Common_3DCNN' "Res_3D_18Net" "Res_3D_34Net" "Res_3D_50Net" 'SSRN' 
+# 'SRACN' "Res_3D_18Net" "Res_3D_34Net" "Res_3D_50Net"
 # 'HybridSN' 'Vgg16' 'MobileNetV1' 'MobileNetV2' 'ResNet18' 'ResNet34' 'ResNet50' 'spec_transformer'
 EXPERIMENT_NAME = "Cnn_Model_Training" # 实验的名称，控制swanlab实验的管理
 
 model_selected = 'spec_transformer' # 从上面选择一个模型
 config_name = "Test" # 配置输出名称，最后的输出名称为 model_selected_config_name_CurrentTime
-train_images_dir = r'd:\pythonproject\Hyspectral_DL\test\test_dataset\.datasets.txt'  # 训练数据集
-test_images_dir = r'd:\pythonproject\Hyspectral_DL\test\test_dataset\.datasets.txt'  # 测试数据集
+train_images_dir = r'c:\Users\85002\Desktop\test\test\train_dataset\.datasets.txt'  # 训练数据集
+test_images_dir = r'c:\Users\85002\Desktop\test\test\test_dataset\.datasets.txt'  # 测试数据集
 out_classes = None # 分类数, 脚本会自动识别数据集中的分类数, 如果想手动指定分类数, 可以在这里指定
 
 

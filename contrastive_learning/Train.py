@@ -19,20 +19,20 @@ DATASET_DICT = {
     2: MIRBS_Dataset
 }
 # 可选用的模型如下：
-# 'SRACN' 'Common_1DCNN' 'Common_2DCNN' 'Common_3DCNN' "Res_3D_18Net" "Res_3D_34Net" "Res_3D_50Net" 'SSRN' 
+# 'SRACN'  "Res_3D_18Net" "Res_3D_34Net" "Res_3D_50Net"
 # 'HybridSN' 'Vgg16' 'MobileNetV1' 'MobileNetV2' 'ResNet18' 'ResNet34' 'ResNet50' 'spec_transformer'
 
 encoder_model_name = 'spec_transformer' # 选择模型名称
 config_model_name = "Test" # 配置后缀名
 TRAIN_MODE = "ETE" # ETE or MOCO 训练方式选择
-DATA_MANAGE_MODE = 2 # 数据管理方式，1为根据裁剪的样本进行训练，2为根据选择的影像自动训练
+DATA_MANAGE_MODE = 1 # 数据管理方式，1为根据裁剪的样本进行训练，2为根据选择的影像自动训练
 patch_size = 17 # DATA_MANAGE_MODE=2 时需指定该参数
-images_dir = r'c:\Users\85002\Desktop\111' # 数据集
+images_dir = r'' # 数据集
 
 
 if_full_cpu = True # 是否全负荷cpu
-epochs = 100  # epoch, 实际训练轮数为 epochs + warm_up_epochs
-batch = 1024  # batch
+epochs = 10  # epoch, 实际训练轮数为 epochs + warm_up_epochs
+batch = 12  # batch
 init_lr = 1e-4  # lr
 min_lr = 1e-6 # 最低学习率
 warm_up_epochs = 10  # 预热epoch数

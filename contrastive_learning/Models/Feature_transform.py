@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import kornia.augmentation as K
 from typing import Tuple
-import random
 
 from typing import Any, Dict, Optional, Tuple, Union
 from kornia.augmentation import random_generator as rg
@@ -91,7 +90,6 @@ class HighDimBatchAugment(nn.Module):
     """高维图像块（如高光谱[B,C,H,W]）的批量增强"""
     def __init__(
             self,
-            # crop_size: Tuple[int, int],
             spectral_mask_prob: float,
             band_dropout_prob:float,
             flip_prob: float = 0.5,
@@ -99,26 +97,18 @@ class HighDimBatchAugment(nn.Module):
             add_gaussian_prob: float=0.5,
             erase_prob: float = 0.5,
             rotate_degrees: float = 90.0,
-            # crop_scale: Tuple[float, float] = (0.8, 1.0),
-            # crop_ratio: Tuple[float, float] = (0.9, 1.1),
             noise_std: float = 0.01,
+            mean: float = 0.0,
             erase_scale: Tuple[float, float] = (0.01, 0.3),
             erase_ratio: Tuple[float, float] = (0.4, 2.5),
             spectral_mask_p: float = 0.25,
             bands_dropout_p: float = 0.25,
     ):
         super().__init__()
-        # 初始化增强操作
         self.flip = K.RandomHorizontalFlip(p=flip_prob)
         self.rotate = K.RandomRotation(degrees=rotate_degrees, p=rotate_prob)
-        # self.crop = K.RandomResizedCrop(
-        #     size=crop_size,
-        #     scale=crop_scale,
-        #     ratio=crop_ratio,
-        #     resample='bilinear'
-        # )
         self.add_gaussian = K.RandomGaussianNoise(
-            mean=0.0, std=noise_std, p=add_gaussian_prob, same_on_batch=False
+            mean=mean, std=noise_std, p=add_gaussian_prob, same_on_batch=False
         )
 
         self.erase = RandomErasing_Fixed(
@@ -141,10 +131,8 @@ class HighDimBatchAugment(nn.Module):
         elif x.dim() == 5:
             x = x.squeeze(1)
         else: pass
-        # （所有操作自动支持批量）
         x = self.flip(x, inplace=True)  # 随机水平翻转
         x = self.rotate(x)  # 随机旋转
-        # x = self.crop(x)  # 随机裁剪
         x = self.add_gaussian(x) # 随机添加高斯噪声
         x = self.erase(x) # 随机擦除
         if self.spectral_mask is not None:
