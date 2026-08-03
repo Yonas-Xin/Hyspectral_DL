@@ -1,0 +1,76 @@
+﻿{
+  "encoder_model_name": "Common_3DCNN",
+  "train_mode": "ETE",
+  "data_manage_mode": 1,
+  "images_dir": "c:\\Users\\85002\\Desktop\\TempDIR\\test0315\\train_dataset",
+  "patch_size": 9,
+  "ck_pth": null,
+  "output_dir": "d:\\TempSave\\model_params",
+
+  "epochs": 30,
+  "warm_up_epochs": 10,
+  "batch_size": 128,
+  "init_lr": 0.0001,
+  "min_lr": 0.000001,
+
+  "experiment_name": "Contrastive_Learning_Training",
+  "model_name": null,
+  "swanlab_available": false,
+  "if_full_cpu": true,
+  "use_data_parallel": true,
+  "multithreading_mode": true,
+  "device": "auto",
+
+  "image_extensions": [
+    "tif",
+    "dat",
+    "bin"
+  ],
+  "K": 65536,
+  "m": 0.999,
+  "T": 0.07,
+  "display_nums": 1,
+
+  "optimizer": {
+    "name": "Adam",
+    "weight_decay": 0.0
+  },
+
+  "dataloader": {
+    "num_workers": null,
+    "num_workers_divisor": 4,
+    "pin_memory": true,
+    "prefetch_factor": 2,
+    "persistent_workers": true,
+    "drop_last": true
+  },
+
+  "augment": {
+    "enabled": true,
+    "spectral_mask_prob": 0.5,
+    "spectral_mask_p": 0.25,
+    "band_dropout_prob": 0.5,
+    "bands_dropout_p": 0.25,
+    "flip_prob": 0.5,
+    "rotate_prob": 0.5,
+    "add_gaussian_prob": 0.5,
+    "erase_prob": 0.5,
+    "rotate_degrees": 90.0,
+    "noise_std": 0.01,
+    "mean": 0.0,
+    "erase_scale": [
+      0.01,
+      0.3
+    ],
+    "erase_ratio": [
+      0.4,
+      2.5
+    ]
+  },
+
+  "feature_map": {
+    "layer_names": [],
+    "num": 36,
+    "interval": 25
+  }
+}

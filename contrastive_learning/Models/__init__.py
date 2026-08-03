@@ -1,2 +1,0 @@
-from contrastive_learning.Models.Models import Ete_Model
-from contrastive_learning.Models import Models

@@ -44,8 +44,8 @@ def noise_from_diffs(X, mask=None, direction='lowerright'):
 
     if direction.lower() not in ['lowerright', 'lowerleft', 'right', 'lower']:
         raise ValueError('Invalid `direction` value.')
-    if mask is not None and mask.dtype != np.bool:
-        mask = mask.astype(np.bool)
+    if mask is not None and mask.dtype != np.bool_:
+        mask = mask.astype(np.bool_)
     if direction == 'lowerright':
         deltas = X[:-1, :-1, :] - X[1:, 1:, :]
         if mask is not None:
@@ -393,7 +393,7 @@ class HyperspectralResampler:
     高光谱数据重采样类，基于指定卫星传感器的波段参数进行重采样
     目标中心波段无法覆盖的区域将被设置为0
     """
-    def __init__(self, input_data_path: str, satellite_name: str = 'ZY102E', 
+    def __init__(self, input_data_path: str, satellite_name: str = 'ZY1E', 
                  delete_wavelengths: list[tuple[float, float]] = [(0,0), (0,0)]):
         """    
             :param input_data_path: 输入高光谱数据路径

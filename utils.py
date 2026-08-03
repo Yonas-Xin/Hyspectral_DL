@@ -1,8 +1,10 @@
 import numpy as np
 import os
+import shutil
 import torch
 import matplotlib.colors as mcolors
 from datetime import datetime
+import json
 
 def get_full_academic_color_256():
     FULL_ACADEMIC_COLOR_256 = [
@@ -173,6 +175,110 @@ def search_files_in_directory(directory: str, extension: str | tuple) -> list[st
                     matching_files.append(os.path.join(root, file))
     return matching_files
 
+def resolve_optional_path(path_value: str | None, base_dir: str | None = None) -> str | None:
+    """
+    Resolve an optional path to an absolute path.
+
+    - None / empty string: return None
+    - absolute path: normalize and return
+    - relative path: resolve against base_dir (or cwd when omitted)
+    """
+    if path_value is None:
+        return None
+    path_value = str(path_value).strip()
+    if not path_value:
+        return None
+
+    path_value = os.path.expanduser(path_value)
+    if os.path.isabs(path_value):
+        return os.path.abspath(path_value)
+
+    if base_dir is None:
+        base_dir = os.getcwd()
+    return os.path.abspath(os.path.join(base_dir, path_value))
+
+def copy_config_json_to_output_dir(config_path: str | None, output_dir: str | None) -> str | None:
+    """Copy a training config JSON file into the run output directory.
+
+    The copied file is named after the output folder itself, for example:
+    ``.../DA_Model_202604061200/DA_Model_202604061200.json``.
+
+    Returns the copied file path, or ``None`` when no config path is provided.
+    """
+    if config_path is None:
+        return None
+
+    resolved_config_path = resolve_optional_path(config_path)
+    if resolved_config_path is None:
+        return None
+    if not os.path.isfile(resolved_config_path):
+        raise FileNotFoundError(f"Config JSON not found: {resolved_config_path}")
+
+    resolved_output_dir = resolve_optional_path(output_dir)
+    if resolved_output_dir is None:
+        raise ValueError("output_dir must be provided when copying config JSON files.")
+
+    output_folder_name = os.path.basename(os.path.normpath(resolved_output_dir))
+    if not output_folder_name:
+        raise ValueError(f"Cannot derive output folder name from path: {resolved_output_dir}")
+
+    os.makedirs(resolved_output_dir, exist_ok=True)
+    copied_path = os.path.join(resolved_output_dir, f"{output_folder_name}.json")
+    shutil.copy2(resolved_config_path, copied_path)
+    return copied_path
+
+def load_config_json(config_path: str | None) -> dict:
+    """Load a JSON config file for experiment logging."""
+    resolved_config_path = resolve_optional_path(config_path)
+    if resolved_config_path is None:
+        return {}
+    if not os.path.isfile(resolved_config_path):
+        raise FileNotFoundError(f"Config JSON not found: {resolved_config_path}")
+    with open(resolved_config_path, "r", encoding="utf-8-sig") as f:
+        return json.loads(_escape_single_backslashes_in_json_strings(f.read()))
+
+def _escape_single_backslashes_in_json_strings(text: str) -> str:
+    """Allow Windows paths with single backslashes inside JSON string values."""
+    result = []
+    in_string = False
+    escaped = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if not in_string:
+            result.append(ch)
+            if ch == '"':
+                in_string = True
+                escaped = False
+            i += 1
+            continue
+
+        if escaped:
+            result.append(ch)
+            escaped = False
+            i += 1
+            continue
+
+        if ch == '"':
+            result.append(ch)
+            in_string = False
+            i += 1
+            continue
+
+        if ch == '\\':
+            next_ch = text[i + 1] if i + 1 < len(text) else ''
+            if next_ch in ('\\', '"'):
+                result.append(ch)
+                escaped = True
+            else:
+                result.append('\\\\')
+            i += 1
+            continue
+
+        result.append(ch)
+        i += 1
+    return ''.join(result)
+
 def read_txt_to_list(filename: str) -> list[str]:
     with open(filename, 'r') as file:
         # 逐行读取文件并去除末尾的换行符
@@ -186,12 +292,38 @@ def write_list_to_txt(data: list[str], filename: str) -> None:
         file.flush()
         
 def read_dataset_from_txt(txt_file: str) -> list[str]:
-    'txt文件绝对地址'
+    """读取 txt 中的路径列表并校验存在性。
+
+    支持行格式为 "路径" 或 "路径 标签"（空格分隔）。
+
+    1) 如果 txt 中的路径全部存在，直接返回解析出的列表，保留标签。
+    2) 否则，用 txt 所在目录 + 文件名重新拼装路径并再次检查；仍不存在则报错。
+    """
     parent_dir = os.path.dirname(txt_file)
-    paths = read_txt_to_list(txt_file)
-    x = [os.path.basename(i) for i in paths]
-    y = [os.path.join(parent_dir, i) for i in x]
-    return y
+    raw_lines = read_txt_to_list(txt_file)
+
+    # 兼容 "path label" 形式，保留标签
+    entries: list[tuple[str, str | None]] = []
+    for line in raw_lines:
+        parts = line.strip().split()
+        if not parts:
+            continue
+        path_part = parts[0]
+        label_part = parts[1] if len(parts) > 1 else None
+        entries.append((path_part, label_part))
+
+    # 原始路径都存在则直接返回
+    missing_original = [p for p, _ in entries if not os.path.exists(p)]
+    if not missing_original:
+        return [f"{p} {lbl}".strip() if lbl else p for p, lbl in entries]
+
+    # 尝试使用文件名在 txt 同级目录下重建路径
+    rebased_entries = [(os.path.join(parent_dir, os.path.basename(p)), lbl) for p, lbl in entries]
+    missing_rebased = [p for p, _ in rebased_entries if not os.path.exists(p)]
+    if missing_rebased:
+        raise FileNotFoundError(f"Missing files after rebasing to {parent_dir}: {missing_rebased}")
+
+    return [f"{p} {lbl}".strip() if lbl else p for p, lbl in rebased_entries]
 
 def save_matrix_to_csv(matrix: np.ndarray | torch.Tensor, filename: str, delimiter: str = ',') -> None:
     """
@@ -211,7 +343,7 @@ def save_matrix_to_csv(matrix: np.ndarray | torch.Tensor, filename: str, delimit
         raise ValueError("输入必须是二维矩阵")
     if isinstance(matrix, torch.Tensor):
         matrix = matrix.detach().cpu().numpy() # 转为 NumPy 数组
-    if matrix.dtype == np.bool: # bool 类型转换为 int
+    if matrix.dtype == np.bool_: # bool 类型转换为 int
         matrix = matrix.astype(np.int16)
     # 使用 NumPy 保存为 CSV
     np.savetxt(filename, matrix, delimiter=delimiter, fmt='%s')

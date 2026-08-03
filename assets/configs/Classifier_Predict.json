@@ -1,0 +1,24 @@
+﻿{
+  "input_data": null,
+  "model_pt": null,
+  "patch_size": null,
+  "output_path": null,
+
+  "mask_path": null,
+  "image_block_size": 512,
+  "batch_size": 256,
+
+  "device": "auto",
+  "background_value": 255,
+  "output_probability": true,
+  "append_timestamp": true,
+
+  "transform": {
+    "name": null
+  },
+
+  "dataloader": {
+    "num_workers": null,
+    "num_workers_divisor": 4
+  }
+}

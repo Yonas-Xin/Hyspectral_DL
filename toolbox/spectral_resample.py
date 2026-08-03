@@ -1,12 +1,15 @@
-import sys
-sys.path.append('.')
+import os, sys
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 from algorithms import HyperspectralResampler
 import numpy as np
 
 input = r''
 output = r''
 
-satellite_name = 'ZY102E' # 输入高光谱的卫星传感器名称，在assts/resample_params文件夹中预定义
+satellite_name = 'ZY1E' # 输入高光谱的卫星传感器名称，在assts/resample_params文件夹中预定义
 target_satellite_name = None # 目标重采样的卫星传感器名称，在assts/resample_params文件夹中预定义
 target_center = np.arange(400, 2541, 10)  # 目标中心波段，400nm到2500nm，每10nm一个波段
 target_fwhm = np.full_like(target_center, 10)  # 每个波段的FWHM为10nm, 为None则自动计算

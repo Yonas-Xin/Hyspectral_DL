@@ -1,4 +1,7 @@
 import os.path
+import json
+import re
+from collections import defaultdict
 try:
     from osgeo import gdal,ogr,osr
     gdal.UseExceptions()
@@ -30,12 +33,144 @@ NP2GDAL_TYPE = {
     np.dtype('float64'): gdal.GDT_Float64
 }
 
+# GDAL 数据类型 -> ENVI 数据类型编号映射
+_GDAL_TO_ENVI_DTYPE = {
+    gdal.GDT_Byte:      1,
+    gdal.GDT_Int16:     2,
+    gdal.GDT_Int32:     3,
+    gdal.GDT_Float32:   4,
+    gdal.GDT_Float64:   5,
+    gdal.GDT_UInt16:    12,
+    gdal.GDT_UInt32:    13,
+    gdal.GDT_CFloat32:  6,
+    gdal.GDT_CFloat64:  9,
+}
+
+
+def _write_bin_meta_file(meta_path: str,
+                         bands: int,
+                         height: int,
+                         width: int,
+                         dtype_name: str,
+                         count: int,
+                         layout: str = 'BHW',
+                         source_image_path: str | None = None,
+                         list_path: str | None = None) -> None:
+    """Write metadata for raw bin samples."""
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                obj = json.load(f)
+                if isinstance(obj, dict):
+                    meta = obj
+        except Exception:
+            meta = {}
+
+    meta.update({
+        'layout': layout,
+        'bands': int(bands),
+        'height': int(height),
+        'width': int(width),
+        'dtype': str(dtype_name),
+        'count': int(count),
+        'updated_at': datetime.now().isoformat(timespec='seconds')
+    })
+    if source_image_path is not None:
+        meta['source_image_path'] = str(source_image_path)
+    if list_path is not None:
+        meta['list_path'] = str(list_path)
+
+    out_dir = os.path.dirname(meta_path)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    with open(meta_path, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+def _parse_metadata_list(raw: str) -> np.ndarray:
+    """将 '{v1, v2, ...}' 或 'v1, v2, ...' 形式的字符串解析为 numpy 数组"""
+    s = raw.strip().strip('{}')
+    return np.fromstring(s, sep=',') if s else np.array([])
+
+def write_envi_hdr(tif_path: str, metadata: dict, dataset: gdal.Dataset) -> str:
+    """
+    在 TIF 文件旁边生成一个与 ENVI 格式兼容的 .hdr 头文件。
+    :param tif_path:  输出的 TIF 文件路径
+    :param metadata:  元数据字典，至少应包含 'wavelength' 键
+    :param dataset:   输出的 GDAL Dataset（已写入数据）
+    :return: 生成的 .hdr 文件路径
+    """
+    hdr_path = os.path.splitext(tif_path)[0] + '.hdr'
+    out_dir = os.path.dirname(hdr_path)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    samples = dataset.RasterXSize
+    lines = dataset.RasterYSize
+    bands = dataset.RasterCount
+    data_type = dataset.GetRasterBand(1).DataType
+    envi_dtype = _GDAL_TO_ENVI_DTYPE.get(data_type, 4)  # 默认 float32
+    wl_units = metadata.get('wavelength units', 'Nanometers')
+    description = metadata.get('description', '')
+    wavelengths = _parse_metadata_list(metadata.get('wavelength', ''))
+    fwhm = _parse_metadata_list(metadata.get('fwhm', ''))
+    def _format_list(arr, fmt='{:.6f}'):
+        items = [fmt.format(v) for v in arr]
+        lines_out = []
+        for i in range(0, len(items), 5):
+            chunk = items[i:i+5]
+            lines_out.append(' ' + ', '.join(chunk))
+        return ',\n'.join(lines_out)
+    
+    with open(hdr_path, 'w', encoding='utf-8') as f:
+        f.write('ENVI\n')
+        if description:
+            f.write(f'description = {{{description}}}\n')
+        f.write(f'samples = {samples}\n')
+        f.write(f'lines   = {lines}\n')
+        f.write(f'bands   = {bands}\n')
+        f.write(f'header offset = 0\n')
+        f.write(f'file type = TIFF\n')
+        f.write(f'data type = {envi_dtype}\n')
+        f.write(f'interleave = bip\n')
+        f.write(f'byte order = 0\n')
+        f.write(f'wavelength units = {wl_units}\n')
+        
+        if len(wavelengths) == bands:
+            f.write('wavelength = {\n')
+            f.write(_format_list(wavelengths))
+            f.write('}\n')
+        
+        if len(fwhm) == bands:
+            f.write('fwhm = {\n')
+            f.write(_format_list(fwhm))
+            f.write('}\n')
+        
+        band_names = []
+        for i in range(1, bands + 1):
+            desc = dataset.GetRasterBand(i).GetDescription()
+            if desc:
+                band_names.append(desc)
+            else:
+                band_names.append(f'Band {i}')
+        f.write('band names = {\n')
+        name_lines = []
+        for i in range(0, len(band_names), 5):
+            chunk = band_names[i:i+5]
+            name_lines.append(' ' + ', '.join(chunk))
+        f.write(',\n'.join(name_lines))
+        f.write('}\n')
+    return hdr_path
+
+# ==========================================================================================
+# 写tif文件，核心函数
+# ==========================================================================================
 def write_data_to_tif(output_file: str, 
                       data: np.ndarray, 
                       geotransform: tuple, 
                       projection: str, 
                       nodata_value: int | float | None = None, 
-                      mask: np.ndarray | None = None):
+                      mask: np.ndarray | None = None,
+                      metadata: dict | None = None):
     """
     将数组数据写入GeoTIFF文件
     
@@ -46,6 +181,8 @@ def write_data_to_tif(output_file: str,
         projection (str): WKT格式的坐标参考系统
         nodata_value (int/float): NoData值, 默认0
         mask (np.ndarray): 可选的掩码数组, 形状应与data的空间维度匹配, 用于保存有效数据区域，其余区域设为nodata_value
+        metadata (dict): 可选的元数据字典, 包含如 wavelength, fwhm, wavelength units 等键值对。
+                         若提供且包含 wavelength, 将同时生成 ENVI 格式 .hdr 头文件
     
     异常:
         IOError: 当文件创建失败时
@@ -57,6 +194,7 @@ def write_data_to_tif(output_file: str,
         data = data.reshape((1, rows, cols))  # 转换为三维
         if data.dtype == np.uint8:
             create_color_table = True # 如果是uint8类型则创建颜色表
+        else: create_color_table = False
     elif len(data.shape) == 3:
         bands, rows, cols = data.shape
         create_color_table = False
@@ -69,13 +207,17 @@ def write_data_to_tif(output_file: str,
     except KeyError:
         raise ValueError(f"不支持的数据类型: {data.dtype}. 支持的类型包括: {list(NP2GDAL_TYPE.keys())}")
     if mask is not None: # 如果提供了掩码, 则将掩码区域外的数据设为nodata_value（默认为0）
-        mask = mask.astype(np.bool)
+        mask = mask.astype(np.bool_)
         data = data.transpose((1, 2, 0))
         data[~mask] = nodata_value
         data = data.transpose((2, 0, 1))
     # 创建文件
+    out_dir = os.path.dirname(output_file)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
     driver = gdal.GetDriverByName("GTiff")
-    dataset = driver.Create(output_file, cols, rows, bands, dtype)
+    dataset = driver.Create(output_file, cols, rows, bands, dtype,
+                            options=['INTERLEAVE=PIXEL'])
     if dataset is None:
         raise IOError(f"无法创建文件 {output_file}")
     # 设置地理变换和投影
@@ -99,10 +241,81 @@ def write_data_to_tif(output_file: str,
         band.WriteArray(data[i,:,:])
         if nodata_value is not None:
             band.SetNoDataValue(nodata_value)  # 设置 NoData 值
+    # 写入元数据
+    if metadata:
+        for key, value in metadata.items():
+            dataset.SetMetadataItem(key, str(value))
+        dataset.FlushCache()
+        # 如果元数据中包含 wavelength，生成 ENVI .hdr 头文件
+        if 'wavelength' in metadata:
+            hdr_path = write_envi_hdr(output_file, metadata, dataset)
+            print(f"INFO: 已生成 ENVI 头文件: {hdr_path}")
     # 释放资源
     dataset.FlushCache()
     dataset = None
     return output_file
+
+def subset_image(input_img: str | gdal.Dataset, output_path: str, band_indices: list[int], metadata: dict):
+    """
+    根据波段索引提取影像波段，保存为BIP交错的TIFF，并同步更新元数据（如波长和FWHM）。
+
+    参数:
+        input_img: str 或 gdal.Dataset, 输入影像的文件路径或已打开的 GDAL Dataset 对象。
+        band_indices: list of int, 需要提取的波段索引列表（注意：GDAL 波段索引从 1 开始）。
+        metadata: dict, 原始影像的元数据字典。期望包含 'wavelength' 和 'fwhm' 键，
+                       值为列表或逗号分隔的字符串，代表所有原始波段的参数。
+        output_path: str, 输出的 TIFF 影像保存路径。
+    """
+    if isinstance(input_img, str):
+        if not os.path.exists(input_img):
+            raise FileNotFoundError(f"找不到输入文件: {input_img}")
+        ds = gdal.Open(input_img)
+    elif isinstance(input_img, gdal.Dataset):
+        ds = input_img
+    else:
+        raise TypeError("input_img 必须是文件路径字符串或 gdal.Dataset 对象。")
+
+    if ds is None:
+        raise ValueError("无法打开输入影像，请检查数据格式。")
+    width = ds.RasterXSize
+    height = ds.RasterYSize
+    proj = ds.GetProjection()
+    geotrans = ds.GetGeoTransform()
+    out_dir = os.path.dirname(output_path)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    translate_options = gdal.TranslateOptions(
+        format='GTiff',
+        bandList=band_indices,
+        creationOptions=['INTERLEAVE=PIXEL'],
+    )
+    out_ds = gdal.Translate(output_path, ds, options=translate_options)
+
+    if out_ds is None:
+        raise ValueError("无法创建输出影像，请检查输出路径或权限。")
+
+    out_ds.SetProjection(proj)
+    out_ds.SetGeoTransform(geotrans)
+
+    for out_idx, in_idx in enumerate(band_indices, start=1):
+        in_band = ds.GetRasterBand(in_idx)
+        if in_band is None:
+            raise ValueError(f"输入影像中不存在波段索引: {in_idx}")
+        nodata = in_band.GetNoDataValue()
+        if nodata is not None:
+            out_ds.GetRasterBand(out_idx).SetNoDataValue(nodata)
+    final_metadata = ds.GetMetadata().copy()
+    if metadata and isinstance(metadata, dict):
+        for key, val in metadata.items():
+            final_metadata[key] = str(val)
+    out_ds.SetMetadata(final_metadata)
+    out_ds.FlushCache()
+    if 'wavelength' in final_metadata:
+        write_envi_hdr(output_path, final_metadata, out_ds)
+    out_ds = None
+    if isinstance(input_img, str):
+        ds = None 
 
 def read_tif(tif_path: str | gdal.Dataset) -> tuple[tuple, str, int, int, int]:
     """读取tif文件，返回地理变换、投影、高宽、波段数"""
@@ -173,6 +386,9 @@ def mask_to_point_shp(mask_matrix: np.ndarray, tif_path: str | gdal.Dataset,
     driver = ogr.GetDriverByName('ESRI Shapefile')
     if not driver:
         raise RuntimeError("Shapefile driver not available")
+    out_dir = os.path.dirname(output_shapefile)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
     data_source = driver.CreateDataSource(output_shapefile)
     # 创建一个图层，用于存储点（Point）几何
     spatial_ref = osr.SpatialReference()
@@ -211,6 +427,8 @@ def mask_to_multipoint_shp(mask_matrix: np.ndarray, tif_path: str | gdal.Dataset
     labels = np.unique(mask_matrix)
     if output_dir_name is None:
         output_dir_name = 'SAMPLES_DIR'
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
     OUTPUT_DIR = os.path.join(output_dir, output_dir_name)
     counter = 1
     while os.path.exists(OUTPUT_DIR):
@@ -289,8 +507,11 @@ def mutipoint_shp_to_mask(shapefile_dir: str, tif_path: str | gdal.Dataset) -> n
         mask_matrix += temp_mask
     return mask_matrix
 
+# ==========================================================================================
+# 根据多shp裁剪样本集，MHMAP工程版本
+# ==========================================================================================
 def clip_by_position(out_dir: str, sr_img: str | gdal.Dataset, position_list: list, patch_size: int = 30, 
-                     out_tif_name: str = 'img', label=None) -> list[str]:
+                     out_tif_name: str = 'img', label=None, output_format: str = 'tif') -> list[str]:
     """
     根据掩码矩阵从影像中裁剪指定大小的图像块
     
@@ -309,6 +530,11 @@ def clip_by_position(out_dir: str, sr_img: str | gdal.Dataset, position_list: li
         RuntimeError: 当无法打开输入文件时
         TypeError: 当sr_img参数类型无效时
     """
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    output_format = str(output_format).lower()
+    if output_format not in ('tif', 'bin'):
+        raise ValueError(f"Unsupported output_format: {output_format}. Expected 'tif' or 'bin'.")
     # 计算中心偏移
     if patch_size % 2 == 0:
         left_top = patch_size // 2 - 1
@@ -385,19 +611,47 @@ def clip_by_position(out_dir: str, sr_img: str | gdal.Dataset, position_list: li
             
             # 保存结果
             idx += 1
-            out_path = os.path.join(out_dir, f"{out_tif_name}_{idx}.tif")
-            write_data_to_tif(out_path, full_data, new_geotrans, im_proj)
+            if output_format == 'tif':
+                out_path = os.path.join(out_dir, f"{out_tif_name}_{idx}.tif")
+                write_data_to_tif(out_path, full_data, new_geotrans, im_proj)
+            else:
+                out_path = os.path.join(out_dir, f"{out_tif_name}_{idx}.bin")
+                if im_bands > 1:
+                    full_data.tofile(out_path)  # [bands, H, W]
+                else:
+                    full_data[np.newaxis, :, :].tofile(out_path)  # [1, H, W]
             if label is not None:
                 out_dataset.append(f"{out_path} {label}")
+            else:
+                # 无标签样本：仅记录样本地址
+                out_dataset.append(f"{out_path}")
         pbar.update(1)
     pbar.close()
+    if output_format == 'bin' and out_dir:
+        try:
+            bin_count = len([n for n in os.listdir(out_dir) if n.lower().endswith('.bin')])
+        except Exception:
+            bin_count = len(out_dataset)
+        source_path = sr_img if isinstance(sr_img, str) else None
+        meta_path = os.path.join(out_dir, 'raw_bip_meta.json')
+        _write_bin_meta_file(
+            meta_path=meta_path,
+            bands=im_bands,
+            height=patch_size,
+            width=patch_size,
+            dtype_name=dtype_name,
+            count=bin_count,
+            layout='BHW',
+            source_image_path=source_path
+        )
     if need_close:
         im_dataset = None
     return out_dataset
 
 def clip_by_shp(out_dir: str, sr_img: str | gdal.Dataset, shp_path: str, patch_size: int = 30, 
                 out_tif_name: str = 'img', label: int | None = None, 
-                sample_num: int = 50000) -> list[str]:
+                sample_num: int = 50000, output_format: str = 'tif',
+                valid_mask: np.ndarray | None = None) -> list[str]:
     """
     根据点Shapefile从影像中裁剪指定大小的图像块
     
@@ -410,7 +664,8 @@ def clip_by_shp(out_dir: str, sr_img: str | gdal.Dataset, shp_path: str, patch_s
         fill_value (int/float): 边缘填充值，默认0
         label (int): 为输出文件名添加的标签值, 默认None
         sample_num (int): 如果是面矢量，最大采样点数量, 默认50000
-    
+        output_format (str): 输出格式，可选 'tif' 或 'bin'，默认 'tif'
+
     返回:
         list: 生成的图像路径列表, 格式为["path1.tif label1", "path2.tif label2", ...]
     
@@ -450,6 +705,10 @@ def clip_by_shp(out_dir: str, sr_img: str | gdal.Dataset, shp_path: str, patch_s
     # 判断是点矢量还是面矢量
     if geom_type_name == "Polygon": 
         mask,_,_ = Mianvector2mask(shp_path, im_dataset, fill_value=1)
+        if valid_mask is not None:
+            if valid_mask.shape != mask.shape:
+                raise ValueError(f"valid_mask shape {valid_mask.shape} does not match image mask shape {mask.shape}")
+            mask = mask & valid_mask.astype(bool)
         positions = np.column_stack(np.where(mask == 1)).tolist()
         if len(positions) > sample_num: # 如果是面矢量且采样量多大，控制采样量为sample_num
             random.seed(42)  # For reproducibility
@@ -463,51 +722,137 @@ def clip_by_shp(out_dir: str, sr_img: str | gdal.Dataset, shp_path: str, patch_s
             x = int((geoX - im_geotrans[0]) / im_geotrans[1])
             y = int((geoY - im_geotrans[3]) / im_geotrans[5])
             positions.append([y, x]) # 注意这里是行列顺序
-    out_dataset = clip_by_position(out_dir, sr_img, positions, patch_size, out_tif_name=out_tif_name, label=label)
+    if valid_mask is not None and geom_type_name != "Polygon":
+        expected_shape = (im_dataset.RasterYSize, im_dataset.RasterXSize)
+        if valid_mask.shape != expected_shape:
+            raise ValueError(f"valid_mask shape {valid_mask.shape} does not match image shape {expected_shape}")
+        positions = [
+            [y, x] for y, x in positions
+            if 0 <= y < valid_mask.shape[0] and 0 <= x < valid_mask.shape[1] and valid_mask[y, x]
+        ]
+    out_dataset = clip_by_position(out_dir, sr_img, positions, patch_size, out_tif_name=out_tif_name, label=label, output_format=output_format)
     im_dataset = None
     return out_dataset
 
-def clip_by_multishp(out_dir: str, sr_img: str | gdal.Dataset, shp_dir: str, block_size: int = 30, out_tif_name: str = 'img'):
+# 文件名中的 Label_{N} 模式（不区分大小写），如 "Label_2_变质岩_20260324" → 2
+LABEL_RE = re.compile(r'(?:^|[_\-\s])label[_\-\s](\d+)', re.IGNORECASE)
+
+
+def resolve_source_name(shp_path: str, part_name: str | None = None) -> str:
+    """取 shapefile 文件名（不含扩展名）作为源类别名。
+
+    若提供 part_name 且文件名以 "_{part_name}" 结尾（划分后产生的子集后缀，
+    如 "Label_2_xxx_shp_train"），则剥离该后缀以还原源类别名。
+    """
+    stem = os.path.splitext(os.path.basename(shp_path))[0]
+    if part_name:
+        suffix = f'_{part_name}'
+        if stem.endswith(suffix):
+            return stem[:-len(suffix)]
+    return stem
+
+
+def build_label_map_from_shps(shp_files: list[str], part_name: str | None = None) -> dict[str, int]:
+    """在一组 shapefile 上构建 {源类别名: 0-based连续标签} 的规范映射。
+
+    规则:
+        1. 优先解析文件名中的 Label_{N} 数字；按所有出现的 N 升序压缩为
+           0-based 连续标签（如 Label_2,5,7 → 0,1,2）；同一 N 视为同一类别。
+        2. 不含 Label_{N} 的文件作为各自独立的新类别，排在规范类别之后，
+           按源类别名排序依次继续编号。
+    """
+    raw_by_source: dict[str, int | None] = {}
+    for shp_path in shp_files:
+        source_name = resolve_source_name(shp_path, part_name)
+        if source_name in raw_by_source:
+            continue
+        match = LABEL_RE.search(os.path.splitext(os.path.basename(shp_path))[0])
+        raw_by_source[source_name] = int(match.group(1)) if match else None
+
+    # 规范类别：按 Label_{N} 升序压缩为 0-based 连续
+    conforming_raws = sorted({raw for raw in raw_by_source.values() if raw is not None})
+    rank_of_raw = {raw: idx for idx, raw in enumerate(conforming_raws)}
+    next_rank = len(conforming_raws)
+
+    label_map: dict[str, int] = {}
+    # 非规范类别：按源名排序，接在规范类别之后继续编号
+    unlabeled_sources = sorted(src for src, raw in raw_by_source.items() if raw is None)
+    rank_of_unlabeled = {src: next_rank + i for i, src in enumerate(unlabeled_sources)}
+
+    for source_name, raw in raw_by_source.items():
+        label_map[source_name] = rank_of_raw[raw] if raw is not None else rank_of_unlabeled[source_name]
+    return label_map
+
+
+def clip_by_multishp(out_dir: str, sr_img: str | gdal.Dataset, shp_dir: str, block_size: int = 30, out_tif_name: str = 'img',
+                     output_format: str = 'tif', valid_mask: np.ndarray | None = None,
+                     label_map: dict[str, int] | None = None, part_name: str | None = None) -> None:
     """
     批量处理目录下多个Shapefile的裁剪任务, 并自动生成记录样本块与标签的数据集
-    
+
+    标签解析规则（目录模式）:
+        标签统一通过 build_label_map_from_shps 归一化为 0-based 连续整数：
+        优先按文件名中的 Label_{N} 数字排序压缩（如 Label_2,5,7 → 0,1,2），
+        无 Label_{N} 的文件作为独立类别排在其后、按文件名继续编号。
+
     参数:
         out_dir (str): 输出目录路径
-        sr_img (str/gdal.Dataset): 输入影像路径或已打开的GDAL数据集对象  
+        sr_img (str/gdal.Dataset): 输入影像路径或已打开的GDAL数据集对象
         shp_dir (str): 包含点Shapefiles的目录路径或者是一个Shapefile文件路径
         block_size (int): 裁剪块大小（像素）, 默认30
         out_tif_name (str): 输出文件名前缀, 默认'img'
-        fill_value (int/float): 边缘填充值, 默认0
-    
+        output_format (str): 输出格式，'tif' 或 'bin'，默认'tif'
+        label_map (dict[str, int]): 可选的 {源文件名: 0-based标签} 映射。
+            提供时跨多次调用（train/val/test）保持同一类别同一标签；
+            未提供时按当前目录内的文件自动构建一份归一化映射。
+        part_name (str): 可选的子集后缀名（如 'shp_train'），用于从划分后的文件名
+            还原源类别名以匹配 label_map。
+
     返回:
         None
-    
+
     异常:
         RuntimeError: 当目录中没有Shapefile或裁剪失败时
     """
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     if os.path.isdir(shp_dir):
-        point_shp_files = search_files_in_directory(shp_dir, extension='.shp')
+        point_shp_files = sorted(search_files_in_directory(shp_dir, extension='.shp'))
         if not point_shp_files:
             raise RuntimeError(f'Not shapefiles found in directory: {shp_dir}')
+        if label_map is None:
+            label_map = build_label_map_from_shps(point_shp_files, part_name=part_name)
         all_out_datasets = []
         for idx, point_shp in enumerate(point_shp_files):
-            out_dataset = clip_by_shp(out_dir, sr_img, point_shp, block_size, out_tif_name=f'{out_tif_name}_label{idx}', label=idx)
+            source_name = resolve_source_name(point_shp, part_name)
+            if source_name not in label_map:
+                raise RuntimeError(f'No label mapping for class "{source_name}" (file: {point_shp})')
+            label = label_map[source_name]
+            shp_name = os.path.basename(point_shp)
+            print(f'  [{idx + 1}/{len(point_shp_files)}] {shp_name}  →  label={label}  (from canonical-map)')
+            out_dataset = clip_by_shp(out_dir, sr_img, point_shp, block_size,
+                                      out_tif_name=f'{out_tif_name}_label{label}',
+                                      label=label, output_format=output_format,
+                                      valid_mask=valid_mask)
             all_out_datasets.extend(out_dataset)
-        if not all_out_datasets:
-            pass
-        else:
+        if all_out_datasets:
             dataset_path = os.path.join(out_dir, '.datasets.txt')
             write_list_to_txt(all_out_datasets, dataset_path)
             print(f'dataset file saved to: {dataset_path}')
     elif os.path.isfile(shp_dir):
-        print('single shape file dont need to write dataset file')
-        out_dataset = clip_by_shp(out_dir, sr_img, shp_dir, block_size, out_tif_name=out_tif_name)
+        print('single shape file: clipped as no-label samples (.txt records path only)')
+        out_dataset = clip_by_shp(out_dir, sr_img, shp_dir, block_size,
+                                  out_tif_name=out_tif_name, output_format=output_format,
+                                  label=None, valid_mask=valid_mask)
+        dataset_path = os.path.join(out_dir, '.datasets.txt')
+        write_list_to_txt(out_dataset, dataset_path)
+        print(f'dataset file saved to: {dataset_path}')
     else:
         raise RuntimeError(f'Invalid point_shp_dir: {shp_dir}, it should be a directory or a shapefile path')
     
-
+# ==========================================================================================
+# 栅格转矢量
+# ==========================================================================================
 def batch_raster_to_vector(tif_dir: str, shp_img_path: str, extension: str = '.tif', dict: dict | None = None, 
                            delete_value: int = 0, if_smooth: bool = False):
     """
@@ -585,6 +930,10 @@ def batch_raster_to_vector(tif_dir: str, shp_img_path: str, extension: str = '.t
         
         Polygon.SyncToDisk()
         Polygon = None
+    if '.shp' in shp_img_path:
+        shp_img_path = shp_img_path[:-4]
+    if shp_img_path and not os.path.exists(shp_img_path):
+        os.makedirs(shp_img_path, exist_ok=True)
     if os.path.isdir(tif_dir):
         listpic = search_files_in_directory(tif_dir, extension)
     else:
@@ -634,27 +983,25 @@ def mask2poly(mask_array: np.ndarray, geotransform: tuple, projection: str, outs
         field_name: 属性字段名称
         remove_zero: 是否删除值为0的要素
     """
-    # 创建内存中的栅格数据集
     driver = gdal.GetDriverByName('MEM')
     rows, cols = mask_array.shape
     
-    # 创建内存栅格
     mem_raster = driver.Create('', cols, rows, 1, gdal.GDT_Byte)
     mem_raster.SetGeoTransform(geotransform)
     mem_raster.SetProjection(projection)
-    
-    # 写入数据
+
     band = mem_raster.GetRasterBand(1)
     band.WriteArray(mask_array)
     band.SetNoDataValue(0)
     band.FlushCache()
-    
-    # 创建空间参考
+
     prj = osr.SpatialReference()
     prj.ImportFromWkt(projection)
-    
-    # 创建Shapefile
+
     drv = ogr.GetDriverByName("ESRI Shapefile")
+    out_dir = os.path.dirname(outshp)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
     if os.path.exists(outshp):
         drv.DeleteDataSource(outshp)
     
@@ -664,19 +1011,15 @@ def mask2poly(mask_array: np.ndarray, geotransform: tuple, projection: str, outs
         srs=prj, 
         geom_type=ogr.wkbMultiPolygon
     )
-    
-    # 创建属性字段
+
     field_defn = ogr.FieldDefn(field_name, ogr.OFTInteger)
     poly_layer.CreateField(field_defn)
-    
-    # 执行栅格转矢量
+
     gdal.Polygonize(band, None, poly_layer, 0, [], callback=None)
-    
-    # 同步到磁盘
+
     poly_layer.SyncToDisk()
     polygon_ds = None
-    
-    # 如果需要删除值为0的要素
+
     if remove_zero:
         driver = ogr.GetDriverByName('ESRI Shapefile')
         shp_dataset = driver.Open(outshp, 1)  # 1表示读写模式
@@ -685,8 +1028,7 @@ def mask2poly(mask_array: np.ndarray, geotransform: tuple, projection: str, outs
             raise RuntimeError(f'Failed to open shapefile: {outshp}')
         
         layer = shp_dataset.GetLayer()
-        
-        # 删除值为0的要素
+
         features_to_delete = []
         feature = layer.GetNextFeature()
         while feature is not None:
@@ -694,18 +1036,19 @@ def mask2poly(mask_array: np.ndarray, geotransform: tuple, projection: str, outs
             if field_value == 0:
                 features_to_delete.append(feature.GetFID())
             feature = layer.GetNextFeature()
-        
-        # 删除要素（从后往前删除，避免索引变化）
+
         for fid in sorted(features_to_delete, reverse=True):
             layer.DeleteFeature(fid)
         
         layer.ResetReading()
         shp_dataset = None
-    
-    # 清理内存栅格
+
     mem_raster = None
     band = None
 
+# ==========================================================================================
+# 随机划分样本，MHMAP工程版本，需要多个shp文件
+# ==========================================================================================
 def random_split_shp(input_shp: str, output_shp1: str, output_shp2: str, num_to_select: int | float, pixel_size: int = 29):
     """
     随机分割点Shapefile为两个新文件
@@ -768,6 +1111,9 @@ def random_split_shp(input_shp: str, output_shp1: str, output_shp2: str, num_to_
         layer_defn = layer.GetLayerDefn()
         
         # 创建输出数据源1（选中的要素）
+        out_dir1 = os.path.dirname(output_shp1)
+        if out_dir1 and not os.path.exists(out_dir1):
+            os.makedirs(out_dir1, exist_ok=True)
         if os.path.exists(output_shp1):
             driver.DeleteDataSource(output_shp1)
         out_ds1 = driver.CreateDataSource(output_shp1)
@@ -781,6 +1127,9 @@ def random_split_shp(input_shp: str, output_shp1: str, output_shp2: str, num_to_
             out_layer1.CreateField(field_defn)
         
         # 创建输出数据源2（剩余的要素）
+        out_dir2 = os.path.dirname(output_shp2)
+        if out_dir2 and not os.path.exists(out_dir2):
+            os.makedirs(out_dir2, exist_ok=True)
         if os.path.exists(output_shp2):
             driver.DeleteDataSource(output_shp2)
         out_ds2 = driver.CreateDataSource(output_shp2)
@@ -808,43 +1157,645 @@ def random_split_shp(input_shp: str, output_shp1: str, output_shp2: str, num_to_
         out_ds1 = None
         out_ds2 = None
         
-        print(f"已随机选择 {num_to_select} 个要素保存到: {output_shp1}")
-        print(f"剩余 {total_features - num_to_select} 个要素保存到: {output_shp2}")
+        print(f"INFO: Train data {num_to_select} features saved to: {output_shp1}")
+        print(f"INFO: Test data {total_features - num_to_select} features saved to: {output_shp2}")
 
-def batch_random_split_shp(input_shp_dir: str, output_dir: str, num_to_select: int | float, pixel_size: int = 29):
+def _split_records_n_way_by_weight(
+    records: list[dict],
+    ratios: list[float],
+    seed: int = 42,
+) -> list[list[dict]]:
     """
-    批量随机分割点Shapefile为两个新文件
-    
+    按面积权重将要素记录分配到 N 个子集，分配比例由 ratios 指定。
+
+    每个类别内部独立分配，确保各子集都尽量有该类别的样本。
+    如果某类别要素数量少于分割数，多余子集可能为空。
+
     参数:
-    input_shp_dir: 输入点Shapefile目录路径
-    output_dir: 输出目录路径，包含分割后的Shapefiles
-    num_to_select: 要随机选取的要素数量
-    """
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    if os.path.isdir(input_shp_dir):
-        shp_files = search_files_in_directory(input_shp_dir, extension='.shp')
-        output_dir1 = os.path.join(output_dir, "split_part1")
-        output_dir2 = os.path.join(output_dir, "split_part2")
-        if not os.path.exists(output_dir1):
-            os.makedirs(output_dir1)
-            os.makedirs(output_dir2)
-        if not shp_files:
-            raise RuntimeError(f'Not shapefiles found in directory: {input_shp_dir}')
-        for shp_file in shp_files:
-            base_name = os.path.basename(shp_file)[:-4]
-            output_shp1 = os.path.join(output_dir1, f"{base_name}_part1.shp")
-            output_shp2 = os.path.join(output_dir2, f"{base_name}_part2.shp")
-            random_split_shp(shp_file, output_shp1, output_shp2, num_to_select, pixel_size=pixel_size)
-    elif os.path.isfile(input_shp_dir):
-        base_name = os.path.basename(input_shp_dir)[:-4]
-        output_shp1 = os.path.join(output_dir, f"{base_name}_part1.shp")
-        output_shp2 = os.path.join(output_dir, f"{base_name}_part2.shp")
-        random_split_shp(input_shp_dir, output_shp1, output_shp2, num_to_select, pixel_size=pixel_size)
-    else:
-        raise RuntimeError(f'Invalid input_shp_dir: {input_shp_dir}, it should be a directory or a shapefile path')
+        records:  要素记录列表，每项含 'label'、'weight'、'feature' 键
+        ratios:   各子集的比例，长度为 N，必须归一化（和为 1）
+        seed:     随机种子
 
+    返回:
+        长度为 N 的列表，每项是属于该子集的 records 列表
+    """
+    n = len(ratios)
+    rng = random.Random(seed)
+
+    grouped: dict[int, list[dict]] = defaultdict(list)
+    for rec in records:
+        grouped[rec['label']].append(rec)
+
+    subsets: list[list[dict]] = [[] for _ in range(n)]
+
+    for _, cls_records in grouped.items():
+        rng.shuffle(cls_records)
+        total_weight = sum(r['weight'] for r in cls_records)
+        if total_weight <= 0:
+            total_weight = len(cls_records)
+
+        # 计算每个子集应分配到的累计权重阈值（前缀和）
+        thresholds = []
+        cumulative = 0.0
+        for ratio in ratios[:-1]:
+            cumulative += ratio
+            thresholds.append(total_weight * cumulative)
+
+        current_weight = 0.0
+        part_idx = 0
+        for rec in cls_records:
+            # 切换到下一分区
+            while part_idx < n - 1 and current_weight >= thresholds[part_idx]:
+                part_idx += 1
+            subsets[part_idx].append(rec)
+            current_weight += rec['weight']
+
+        # 保证每个子集至少有一个来自该类别的要素（当要素数量足够时）
+        n_cls = len(cls_records)
+        for i in range(min(n, n_cls)):
+            if not subsets[i]:
+                # 从最大子集中借一个
+                largest = max(range(n), key=lambda k: len(subsets[k]))
+                if len(subsets[largest]) > 1:
+                    subsets[i].append(subsets[largest].pop())
+
+    return subsets
+
+
+def batch_random_split_shp(
+    input_shp_dir: str,
+    output_dir: str,
+    ratios: list[float],
+    seed: int = 42,
+    part_names: list[str] | None = None,
+    valid_mask: np.ndarray | None = None,
+    valid_mask_tif: str | gdal.Dataset | None = None,
+) -> list[str]:
+    """
+    批量将 Shapefile 按给定比例列表随机分割为 N 个子集。
+
+    - 点要素：按要素数量比例分配
+    - 面要素：按多边形面积比例分配（不栅格化），与 random_split_shp_by_area_and_clip 一致
+
+    输出结构（output_dir 下）:
+        <part_names[0]>/  <part_names[1]>/  ... （默认为 split_part1, split_part2, ...）
+
+    参数:
+        input_shp_dir: 输入 Shapefile 文件夹路径，或单个 .shp 文件路径
+        output_dir:    分割结果根目录
+        ratios:        各子集比例列表，如 [0.6, 0.2, 0.2]，必须正数且和为 1
+        seed:          随机种子，默认 42
+        part_names:    各子集输出子文件夹名称列表，长度应与 ratios 一致；
+                       未提供或长度不足时，多余分区使用 split_partN 作为默认名称
+
+    返回:
+        各子集输出目录的绝对路径列表
+    """
+    # ---------- 参数校验 ----------
+    if not ratios or len(ratios) < 2:
+        raise ValueError('ratios 至少需要 2 个元素')
+    if any(r <= 0 for r in ratios):
+        raise ValueError('ratios 中每个比例必须大于 0')
+    total = sum(ratios)
+    if not np.isclose(total, 1.0, atol=1e-6):
+        raise ValueError(f'ratios 之和必须为 1，当前为 {total:.6f}')
+
+    n = len(ratios)
+    os.makedirs(output_dir, exist_ok=True)
+
+    valid_mask_ds = None
+    close_valid_mask_ds = False
+    if valid_mask is not None:
+        valid_mask = valid_mask.astype(bool)
+        if valid_mask_tif is None:
+            raise ValueError('valid_mask_tif must be provided when valid_mask is used')
+        if isinstance(valid_mask_tif, str):
+            valid_mask_ds = gdal.Open(valid_mask_tif)
+            close_valid_mask_ds = True
+            if valid_mask_ds is None:
+                raise RuntimeError(f'Cannot open valid_mask_tif: {valid_mask_tif}')
+        elif isinstance(valid_mask_tif, gdal.Dataset):
+            valid_mask_ds = valid_mask_tif
+        else:
+            raise TypeError('valid_mask_tif must be a path or gdal.Dataset')
+        expected_shape = (valid_mask_ds.RasterYSize, valid_mask_ds.RasterXSize)
+        if valid_mask.shape != expected_shape:
+            raise ValueError(f'valid_mask shape {valid_mask.shape} does not match image shape {expected_shape}')
+
+    def _weight_from_valid_mask(feature: ogr.Feature, source_layer: ogr.Layer, is_polygon_feature: bool) -> float:
+        geom = feature.GetGeometryRef()
+        if geom is None:
+            return 0.0
+        if valid_mask is None:
+            if is_polygon_feature:
+                area = geom.GetArea()
+                return area if area > 0 else 1.0
+            return 1.0
+
+        geotrans = valid_mask_ds.GetGeoTransform()
+        if not is_polygon_feature:
+            geo_x, geo_y = geom.GetX(), geom.GetY()
+            col = int((geo_x - geotrans[0]) / geotrans[1])
+            row = int((geo_y - geotrans[3]) / geotrans[5])
+            if 0 <= row < valid_mask.shape[0] and 0 <= col < valid_mask.shape[1] and valid_mask[row, col]:
+                return 1.0
+            return 0.0
+
+        mem_driver = gdal.GetDriverByName('MEM')
+        mask_ds = mem_driver.Create('', valid_mask.shape[1], valid_mask.shape[0], 1, gdal.GDT_Byte)
+        mask_ds.SetGeoTransform(geotrans)
+        mask_ds.SetProjection(valid_mask_ds.GetProjection())
+        mask_band = mask_ds.GetRasterBand(1)
+        mask_band.Fill(0)
+
+        vec_driver = ogr.GetDriverByName('Memory')
+        vec_ds = vec_driver.CreateDataSource('')
+        vec_layer = vec_ds.CreateLayer('feature', srs=source_layer.GetSpatialRef(), geom_type=source_layer.GetGeomType())
+        feat = ogr.Feature(vec_layer.GetLayerDefn())
+        feat.SetGeometry(geom.Clone())
+        vec_layer.CreateFeature(feat)
+        feat = None
+
+        gdal.RasterizeLayer(mask_ds, [1], vec_layer, burn_values=[1])
+        feature_mask = mask_band.ReadAsArray().astype(bool)
+        weight = int(np.sum(feature_mask & valid_mask))
+        vec_ds = None
+        mask_ds = None
+        return float(weight)
+
+    # 解析子文件夹名称：优先使用 part_names，不足时补 split_partN
+    resolved_names: list[str] = []
+    for i in range(n):
+        if part_names and i < len(part_names) and part_names[i]:
+            resolved_names.append(str(part_names[i]))
+        else:
+            resolved_names.append(f'split_part{i + 1}')
+
+    # 创建所有子集目录
+    part_dirs = [os.path.join(output_dir, name) for name in resolved_names]
+    for d in part_dirs:
+        os.makedirs(d, exist_ok=True)
+
+    # 收集待处理的 shp 文件
+    if os.path.isdir(input_shp_dir):
+        shp_files = sorted(search_files_in_directory(input_shp_dir, extension='.shp'))
+        if not shp_files:
+            raise RuntimeError(f'目录中未找到 Shapefile: {input_shp_dir}')
+    elif os.path.isfile(input_shp_dir):
+        shp_files = [input_shp_dir]
+    else:
+        raise RuntimeError(f'无效路径（非文件夹也非 .shp 文件）: {input_shp_dir}')
+
+    ratio_str = ' / '.join(f'{r:.0%}' for r in ratios)
+    name_str  = ' / '.join(resolved_names)
+    print(f'batch_random_split_shp | {len(shp_files)} 个文件 | [{name_str}] = [{ratio_str}] | seed={seed}')
+
+    for shp_file in shp_files:
+        base_name = os.path.basename(shp_file)[:-4]
+
+        # 读取图层
+        shp_ds = ogr.Open(shp_file)
+        if shp_ds is None:
+            print(f'  [!] 无法打开，跳过: {shp_file}')
+            continue
+        layer = shp_ds.GetLayer()
+        geom_type = ogr.GT_Flatten(layer.GetGeomType())
+        is_polygon = geom_type in (ogr.wkbPolygon, ogr.wkbMultiPolygon)
+
+        # 构建 records（point → weight=1, polygon → weight=面积）
+        records: list[dict] = []
+        layer.ResetReading()
+        for feature in layer:
+            geom = feature.GetGeometryRef()
+            if geom is None:
+                continue
+            weight = _weight_from_valid_mask(feature, layer, is_polygon)
+            if weight <= 0:
+                continue
+            # 如果有 class 字段则读取，否则统一 label=0
+            class_field = _find_field_name_case_insensitive(
+                layer, ['Classvalue', 'classvalue', 'class', 'label'])
+            label_raw = feature.GetField(class_field) if class_field else None
+            label = int(label_raw) if label_raw is not None else 0
+            records.append({'feature': feature.Clone(), 'label': label, 'weight': weight})
+
+        if not records:
+            print(f'  [!] 无有效要素，跳过: {base_name}')
+            shp_ds = None
+            continue
+
+        # 分割
+        subsets = _split_records_n_way_by_weight(records, ratios, seed=seed)
+
+        # 写出各子集
+        counts = []
+        for i, (part_records, part_dir) in enumerate(zip(subsets, part_dirs)):
+            out_shp = os.path.join(part_dir, f'{base_name}_{resolved_names[i]}.shp')
+            _write_feature_subset_to_shp(out_shp, layer, part_records)
+            counts.append(len(part_records))
+
+        count_str = ' | '.join(
+            f'{resolved_names[i]}={c}{"(poly)" if is_polygon else "(pt)"}' for i, c in enumerate(counts))
+        print(f'  {base_name}: {count_str}')
+        shp_ds = None
+
+    if close_valid_mask_ds:
+        valid_mask_ds = None
+    print(f'Complete. Output directory: {output_dir}')
+    return part_dirs
+
+# ==========================================================================================
+# 根据GISPRO样本管理器创建的样本shp来随机划分训练-测试集并裁剪样本
+# ==========================================================================================
+def _find_field_name_case_insensitive(layer: ogr.Layer, candidates: list[str]) -> str | None:
+    """从图层中按大小写不敏感方式查找字段名。"""
+    layer_defn = layer.GetLayerDefn()
+    field_name_map = {}
+    for i in range(layer_defn.GetFieldCount()):
+        name = layer_defn.GetFieldDefn(i).GetName()
+        field_name_map[name.lower()] = name
+    for candidate in candidates:
+        match = field_name_map.get(candidate.lower())
+        if match is not None:
+            return match
+    return None
+
+
+def _split_records_by_weight(records: list[dict], train_ratio: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
+    """
+    按类别分组后，使用要素面积或权重累计值进行训练/测试划分。
+    这样可以在各类别内尽量维持与 train_ratio 一致的样本量比例。
+    """
+    rng = random.Random(seed)
+    grouped = defaultdict(list)
+    for rec in records:
+        grouped[rec['label']].append(rec)
+
+    train_records = []
+    test_records = []
+
+    for _, cls_records in grouped.items():
+        rng.shuffle(cls_records)
+        total_weight = sum(r['weight'] for r in cls_records)
+        target_train_weight = total_weight * train_ratio
+        current_train_weight = 0
+        class_train = []
+        class_test = []
+
+        for rec in cls_records:
+            rec_weight = rec['weight']
+            if current_train_weight < target_train_weight:
+                class_train.append(rec)
+                current_train_weight += rec_weight
+            else:
+                class_test.append(rec)
+
+        # 保证在类别内尽量两侧都有样本
+        if len(class_test) == 0 and len(class_train) > 1:
+            class_test.append(class_train.pop())
+        if len(class_train) == 0 and len(class_test) > 1:
+            class_train.append(class_test.pop())
+
+        train_records.extend(class_train)
+        test_records.extend(class_test)
+
+    return train_records, test_records
+
+
+def _resolve_dataset_split_ratios(
+    train_ratio: float,
+    val_ratio: float = 0.0,
+    test_ratio: float | None = None
+) -> tuple[float, float, float]:
+    train_ratio = float(train_ratio)
+    val_ratio = float(val_ratio)
+    if test_ratio is None:
+        test_ratio = 1.0 - train_ratio - val_ratio
+    else:
+        test_ratio = float(test_ratio)
+
+    ratios = (train_ratio, val_ratio, test_ratio)
+    if train_ratio <= 0:
+        raise ValueError('train_ratio 必须大于 0')
+    if any(r < 0 for r in ratios):
+        raise ValueError('train/val/test 比例不能为负数')
+    if not np.isclose(sum(ratios), 1.0, atol=1e-6):
+        raise ValueError(
+            f'train/val/test 比例之和必须为 1，当前为 {sum(ratios):.6f}'
+        )
+    if val_ratio + test_ratio <= 0:
+        raise ValueError('val_ratio 与 test_ratio 至少需要一个大于 0')
+    return train_ratio, val_ratio, test_ratio
+
+
+def _split_records_three_way_by_weight(
+    records: list[dict],
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    seed: int = 42
+) -> tuple[list[dict], list[dict], list[dict]]:
+    train_records, holdout_records = _split_records_by_weight(records, train_ratio, seed=seed)
+
+    if val_ratio <= 0:
+        return train_records, [], holdout_records
+    if test_ratio <= 0:
+        return train_records, holdout_records, []
+
+    holdout_ratio = val_ratio + test_ratio
+    val_share = val_ratio / holdout_ratio
+    val_records, test_records = _split_records_by_weight(holdout_records, val_share, seed=seed + 1)
+    return train_records, val_records, test_records
+
+
+def _write_feature_subset_to_shp(output_shp: str, source_layer: ogr.Layer, feature_records: list[dict]) -> str:
+    """将要素子集写入新的 Shapefile，保留原字段结构。"""
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    out_dir = os.path.dirname(output_shp)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    if os.path.exists(output_shp):
+        driver.DeleteDataSource(output_shp)
+
+    source_layer_defn = source_layer.GetLayerDefn()
+    source_srs = source_layer.GetSpatialRef()
+    source_geom_type = source_layer.GetGeomType()
+
+    old_shape_encoding = gdal.GetConfigOption('SHAPE_ENCODING')
+    gdal.SetConfigOption('SHAPE_ENCODING', 'UTF-8')
+    try:
+        out_ds = driver.CreateDataSource(output_shp)
+        if out_ds is None:
+            raise RuntimeError(f'无法创建输出 Shapefile: {output_shp}')
+
+        out_layer = out_ds.CreateLayer(
+            os.path.basename(output_shp)[:-4],
+            srs=source_srs,
+            geom_type=source_geom_type,
+            options=['ENCODING=UTF-8']
+        )
+
+        for i in range(source_layer_defn.GetFieldCount()):
+            field_defn = source_layer_defn.GetFieldDefn(i)
+            out_layer.CreateField(field_defn)
+
+        for rec in feature_records:
+            out_layer.CreateFeature(rec['feature'].Clone())
+
+        out_ds.FlushCache()
+        out_ds = None
+    finally:
+        gdal.SetConfigOption('SHAPE_ENCODING', old_shape_encoding)
+    return output_shp
+
+
+def _get_positions_from_feature(feature: ogr.Feature, tif_ds: gdal.Dataset,
+                                rng: random.Random) -> list[list[int]]:
+    """从单个点/面要素提取像素位置列表。"""
+    geom = feature.GetGeometryRef()
+    if geom is None:
+        return []
+
+    geotrans = tif_ds.GetGeoTransform()
+    width = tif_ds.RasterXSize
+    height = tif_ds.RasterYSize
+    flat_type = ogr.GT_Flatten(geom.GetGeometryType())
+
+    # 点要素: 一个点对应一个样本
+    if flat_type == ogr.wkbPoint:
+        geo_x, geo_y = geom.GetX(), geom.GetY()
+        col = int((geo_x - geotrans[0]) / geotrans[1])
+        row = int((geo_y - geotrans[3]) / geotrans[5])
+        if 0 <= row < height and 0 <= col < width:
+            return [[row, col]]
+        return []
+
+    # 面要素: 返回面内全部覆盖像素
+    if flat_type in (ogr.wkbPolygon, ogr.wkbMultiPolygon):
+        mem_driver = gdal.GetDriverByName('MEM')
+        mask_ds = mem_driver.Create('', width, height, 1, gdal.GDT_Byte)
+        mask_ds.SetGeoTransform(geotrans)
+        mask_ds.SetProjection(tif_ds.GetProjection())
+        mask_band = mask_ds.GetRasterBand(1)
+        mask_band.Fill(0)
+
+        # Use RasterizeLayer for better compatibility across GDAL versions.
+        vec_mem_driver = ogr.GetDriverByName('Memory')
+        vec_ds = vec_mem_driver.CreateDataSource('')
+        tif_srs = None
+        tif_wkt = tif_ds.GetProjection()
+        if tif_wkt:
+            tif_srs = osr.SpatialReference()
+            tif_srs.ImportFromWkt(tif_wkt)
+        vec_layer = vec_ds.CreateLayer('poly', srs=tif_srs, geom_type=ogr.wkbUnknown)
+        feat_defn = vec_layer.GetLayerDefn()
+        feat = ogr.Feature(feat_defn)
+        feat.SetGeometry(geom.Clone())
+        vec_layer.CreateFeature(feat)
+        feat = None
+
+        gdal.RasterizeLayer(mask_ds, [1], vec_layer, burn_values=[1])
+        mask = mask_band.ReadAsArray()
+        coords = np.argwhere(mask == 1)
+        if coords.size == 0:
+            vec_ds = None
+            mask_ds = None
+            return []
+        vec_ds = None
+        mask_ds = None
+        return coords.tolist()
+
+    return []
+
+
+def _clip_records_to_dataset_txt(records: list[dict], tif_ds: gdal.Dataset, out_dir: str,
+                                 subset_name: str, patch_size: int, seed: int,
+                                 output_format: str = 'tif') -> list[str]:
+    """根据要素记录裁剪样本，并返回 'path label' 形式列表。"""
+    rng = random.Random(seed)
+    positions_by_label = defaultdict(list)
+
+    for rec in records:
+        positions = _get_positions_from_feature(rec['feature'], tif_ds, rng)
+        if positions:
+            positions_by_label[rec['label']].extend(positions)
+
+    dataset_lines = []
+    for label, positions in sorted(positions_by_label.items(), key=lambda x: x[0]):
+        out_prefix = f'{subset_name}_label{label}'
+        lines = clip_by_position(
+            out_dir=out_dir,
+            sr_img=tif_ds,
+            position_list=positions,
+            patch_size=patch_size,
+            out_tif_name=out_prefix,
+            label=label,
+            output_format=output_format
+        )
+        dataset_lines.extend(lines)
+
+    return dataset_lines
+
+
+def random_split_shp_by_area_and_clip(
+    tif_path: str,
+    shp_path: str,
+    output_dir: str,
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.0,
+    test_ratio: float | None = None,
+    patch_size: int = 9,
+    seed: int = 42,
+    output_format: str = 'tif'
+) -> dict:
+    """Split a single shapefile into train/val/test subsets and clip samples."""
+    if not os.path.exists(tif_path):
+        raise FileNotFoundError(f'输入 tif 不存在: {tif_path}')
+    if not os.path.exists(shp_path):
+        raise FileNotFoundError(f'输入 shp 不存在: {shp_path}')
+
+    train_ratio, val_ratio, test_ratio = _resolve_dataset_split_ratios(
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+    )
+    output_format = str(output_format).lower()
+    if output_format not in ('tif', 'bin'):
+        raise ValueError(f"Unsupported output_format: {output_format}. Expected 'tif' or 'bin'.")
+
+    os.makedirs(output_dir, exist_ok=True)
+    split_dir = os.path.join(output_dir, 'split_shp')
+    train_img_dir = os.path.join(output_dir, 'train_dataset')
+    val_img_dir = os.path.join(output_dir, 'val_dataset')
+    test_img_dir = os.path.join(output_dir, 'test_dataset')
+    os.makedirs(split_dir, exist_ok=True)
+    os.makedirs(train_img_dir, exist_ok=True)
+    os.makedirs(val_img_dir, exist_ok=True)
+    os.makedirs(test_img_dir, exist_ok=True)
+
+    shp_ds = ogr.Open(shp_path)
+    if shp_ds is None:
+        raise RuntimeError(f'无法打开输入 shp: {shp_path}')
+    layer = shp_ds.GetLayer()
+
+    class_field = _find_field_name_case_insensitive(layer, ['Classvalue', 'classvalue', 'class', 'label'])
+    if class_field is None:
+        shp_ds = None
+        raise ValueError('未找到类别字段，请至少包含 Classvalue/class/label 之一')
+
+    records = []
+    layer.ResetReading()
+    for feature in layer:
+        geom = feature.GetGeometryRef()
+        if geom is None:
+            continue
+
+        label_raw = feature.GetField(class_field)
+        if label_raw is None:
+            continue
+        label = int(label_raw)
+
+        flat_type = ogr.GT_Flatten(geom.GetGeometryType())
+        if flat_type in (ogr.wkbPolygon, ogr.wkbMultiPolygon):
+            weight = geom.GetArea()
+            if weight <= 0:
+                weight = 1
+        else:
+            weight = 1
+
+        records.append({
+            'feature': feature.Clone(),
+            'label': label,
+            'weight': weight
+        })
+
+    if not records:
+        shp_ds = None
+        raise RuntimeError('输入 shp 中没有可用要素（请检查几何或字段值）')
+
+    train_records, val_records, test_records = _split_records_three_way_by_weight(
+        records=records,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
+    )
+
+    train_shp = os.path.join(split_dir, 'train_split.shp')
+    val_shp = os.path.join(split_dir, 'val_split.shp')
+    test_shp = os.path.join(split_dir, 'test_split.shp')
+    _write_feature_subset_to_shp(train_shp, layer, train_records)
+    if val_ratio > 0:
+        _write_feature_subset_to_shp(val_shp, layer, val_records)
+    _write_feature_subset_to_shp(test_shp, layer, test_records)
+    shp_ds = None
+
+    tif_ds = gdal.Open(tif_path)
+    if tif_ds is None:
+        raise RuntimeError(f'无法打开输入 tif: {tif_path}')
+
+    train_lines = _clip_records_to_dataset_txt(
+        records=train_records,
+        tif_ds=tif_ds,
+        out_dir=train_img_dir,
+        subset_name='train',
+        patch_size=patch_size,
+        seed=seed,
+        output_format=output_format
+    )
+    val_lines = []
+    if val_ratio > 0:
+        val_lines = _clip_records_to_dataset_txt(
+            records=val_records,
+            tif_ds=tif_ds,
+            out_dir=val_img_dir,
+            subset_name='val',
+            patch_size=patch_size,
+            seed=seed + 1,
+            output_format=output_format
+        )
+    test_lines = _clip_records_to_dataset_txt(
+        records=test_records,
+        tif_ds=tif_ds,
+        out_dir=test_img_dir,
+        subset_name='test',
+        patch_size=patch_size,
+        seed=seed + 2,
+        output_format=output_format
+    )
+
+    train_txt = os.path.join(train_img_dir, '.datasets.txt')
+    val_txt = os.path.join(val_img_dir, '.datasets.txt')
+    test_txt = os.path.join(test_img_dir, '.datasets.txt')
+    write_list_to_txt(train_lines, train_txt)
+    write_list_to_txt(val_lines, val_txt)
+    write_list_to_txt(test_lines, test_txt)
+
+    tif_ds = None
+
+    print(f'train shapefile: {train_shp}')
+    if val_ratio > 0:
+        print(f'val shapefile: {val_shp}')
+    print(f'test shapefile: {test_shp}')
+    print(f'train samples txt: {train_txt} ({len(train_lines)} samples)')
+    if val_ratio > 0:
+        print(f'val samples txt: {val_txt} ({len(val_lines)} samples)')
+    print(f'test samples txt: {test_txt} ({len(test_lines)} samples)')
+
+    return {
+        'train_shp': train_shp,
+        'val_shp': val_shp if val_ratio > 0 else None,
+        'test_shp': test_shp,
+        'train_txt': train_txt,
+        'val_txt': val_txt,
+        'test_txt': test_txt,
+        'train_samples': len(train_lines),
+        'val_samples': len(val_lines),
+        'test_samples': len(test_lines)
+    }
+# ==========================================================================================
+# 分类图去除碎斑（栅格格式）
+# ==========================================================================================
 def sieve_filtering(input_tif_path, output_tif_path, threshold_pixels, connectedness=8, mask=None):
     """
     使用GDAL的SieveFilter去除碎斑
@@ -865,6 +1816,9 @@ def sieve_filtering(input_tif_path, output_tif_path, threshold_pixels, connected
 
     driver = gdal.GetDriverByName('GTiff')
     # 创建副本作为输出，避免修改原图
+    out_dir = os.path.dirname(output_tif_path)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
     dst_ds = driver.CreateCopy(output_tif_path, src_ds, 0)
     dst_band = dst_ds.GetRasterBand(1)
     if mask is not None:
